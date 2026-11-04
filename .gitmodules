@@ -1,0 +1,3 @@
+[submodule "reference/SR"]
+	path = reference/SR
+	url = https://github.com/M-HT/SR.git

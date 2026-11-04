@@ -1,0 +1,22 @@
+# --- RE scratch tree: only source + config belong in git ---
+
+# Ghidra and JDK are installed beside the repo, not tracked (~700 MB unpacked)
+ghidra_12.2_PUBLIC/
+jdk-21/
+*.zip
+
+# Septerra Core retail CD image / install media, and anything extracted from it.
+# Never commit game data.
+septerra_core/
+septerra_extracted/
+
+# Third-party libs pulled down by C:\Users\Admin\get_*.py
+# (SDL2, mpg123, libquicktime, lqt stubs, unshield)
+libs/
+
+# Belt-and-braces for reference/SR build output (the submodule has its own .gitignore)
+reference/SR/**/*.obj
+reference/SR/**/*.exe
+reference/SR/**/*.pdb
+reference/SR/**/.sconsign.dblite
+reference/SR/**/*.1.02-derived.bak
