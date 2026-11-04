@@ -20,3 +20,6 @@ reference/SR/**/*.exe
 reference/SR/**/*.pdb
 reference/SR/**/.sconsign.dblite
 reference/SR/**/*.1.02-derived.bak
+
+# local scratch: SRW runs, generated .asm/.inc, dumps
+work/
