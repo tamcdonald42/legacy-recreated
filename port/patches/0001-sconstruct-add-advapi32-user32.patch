@@ -1,0 +1,13 @@
+diff --git a/games/Septerra Core/SR-Septerra/SConstruct b/games/Septerra Core/SR-Septerra/SConstruct
+index a4d1c0e..009177a 100644
+--- a/games/Septerra Core/SR-Septerra/SConstruct	
++++ b/games/Septerra Core/SR-Septerra/SConstruct	
+@@ -197,7 +197,7 @@ elif device.endswith('-windows'):
+     if env['CC'] == 'cl':
+         env.Append(CCFLAGS   = '/Dmain=SDL_main /MD',
+                    LINKFLAGS = '/SUBSYSTEM:WINDOWS /NXCOMPAT /TSAWARE',
+-                   LIBS      = ['SDL2main', 'SDL2', 'mpg123-0', 'quicktime', 'winmm', 'shell32']
++                   LIBS      = ['SDL2main', 'SDL2', 'mpg123-0', 'quicktime', 'winmm', 'shell32', 'advapi32', 'user32']
+                   )
+     else:
+         env.Append(CCFLAGS   = '-Dmain=SDL_main',

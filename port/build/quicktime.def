@@ -1,0 +1,26 @@
+LIBRARY quicktime
+EXPORTS
+  lqt_open_read
+  lqt_decode_video
+  lqt_decode_audio_raw
+  lqt_decode_audio_track
+  lqt_frame_time
+  lqt_last_audio_position
+  lqt_get_best_colormodel
+  lqt_get_sample_format
+  lqt_rows_alloc
+  lqt_rows_free
+  lqt_set_cmodel
+  lqt_video_duration
+  lqt_video_time_scale
+  lqt_close
+  quicktime_close
+  quicktime_audio_length
+  quicktime_audio_tracks
+  quicktime_video_tracks
+  quicktime_sample_rate
+  quicktime_track_channels
+  quicktime_video_width
+  quicktime_video_height
+  quicktime_supported_video
+  quicktime_supported_audio
