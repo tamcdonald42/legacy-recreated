@@ -108,3 +108,39 @@ pristine — keep it that way.
 `SR-Septerra.exe`: 439296 bytes, PE32 i386, subsystem WINDOWS, image base `0x400000`,
 imports SDL2 / libmpg123-0 / quicktime(stub) / WINMM / ADVAPI32 / USER32 / KERNEL32 /
 SHELL32. Runtime needs `SDL2.dll`, `libmpg123-0.dll`, `quicktime.dll` beside it.
+
+## Decompilation (the actual source-port path)
+
+The recomp is not the source port; it is the map plus the oracle. Ghidra work lives in
+`port/ghidra/`, project in `work/ghidra-proj/Septerra`, output in `work/ghidra-out/`.
+
+```
+port\ghidra\analyze_septerra.bat   -> import + analyze + Inventory.java
+port\ghidra\ground_truth.bat       -> GroundTruth.java (seed .sci truth) + labeled inventory
+```
+
+Ghidra 12.2 needs **JDK 25** (`H:\jdk-25\jdk-25.0.5+8`); the JDK 21 that
+`install_ghidra.py` pulled is too old and fails with "unsupported java version". The project
+directory must exist before `analyzeHeadless` runs ("Directory not found" otherwise).
+
+### Inventory of the original 1.04 (measured)
+
+| | count | bytes |
+|---|---|---|
+| functions recovered | 1335 | 429588 |
+| looks like MSVC CRT (skip — link the real CRT instead) | 427 | 87061 (20%) |
+| game/engine | 908 | 342527 (80%) |
+| of which still unnamed `FUN_*` | 806 | 327180 |
+| asm<->C boundary (`*_asm2c`, already C in the shim) | 83 | — |
+
+Median function 114 bytes; 451 functions <=64 bytes; 88 >=1025 bytes; largest 6565 bytes
+(`FUN_0043fc30`). Ground truth seeded: 84 renamed, 2 no-return, 5 missed code ranges
+disassembled, 31 data ranges cleared.
+
+**Correction to the obvious plan:** the `.db` archive reader is *not* a decompilation target.
+`OpenGameDataFiles` / `RecordOpen` / `RecordRead` / `CloseGameDataFiles` are already written in
+C in `Game-DataFiles.c` — the generated asm just calls them (`*_asm2c` = asm calls C). The 83
+boundary functions are done; the remaining work is the 806 unnamed game/engine functions.
+
+Next sensible step: walk the call graph down from `WinMain_` (0x412b80) to pick subsystems by
+boundary rather than by address.
