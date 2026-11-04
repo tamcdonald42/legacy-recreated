@@ -58,7 +58,8 @@ currently pristine — keep it that way.
 
 - [x] Ghidra 12.2 + JDK 21 installed, launcher works
 - [x] `SRW.exe` built (384512 bytes, scons + MSVC BuildTools 2022 x86)
-- [x] `SR-Septerra` C glue compiles (30 `.obj`) — no link, no `.exe` yet
+- [x] `SR-Septerra` C glue compiles (19 `.obj`) — no link, no `.exe` yet;
+      verified by full rebuild 2026-11-04, stops at `x86\Septerra.asm' not found`
 - [x] Runtime libs staged and `mpg123-0.lib` generated from `.def`
 - [ ] **Obtain English 1.04 `Septerra.exe`** <- blocker
 - [ ] Run `SRW.exe Septerra104.exe Septerra.asm`, then `scons` to link `SR-Septerra.exe`
@@ -75,6 +76,10 @@ move the generated .asm/.inc into ..\..\..\games\Septerra Core\SR-Septerra\x86\
 cd H:\ghidra\reference\SR\games\Septerra Core\SR-Septerra
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x86 && scons
 ```
+
+`rebuild-srsepterra.bat` in the repo root does the `vcvarsall` + `PATH_INC`/`PATH_LIB` + `scons`
+sequence. A bare `scons` in `SR-Septerra` fails with `Cannot open include file: 'SDL.h'` — the
+include/lib paths only reach SCons through those env vars (SConstruct:125-128).
 
 NASM is **not** on PATH on the host (`Get-Command nasm` -> empty); `build-x86.sh` needs it, and
 versions 2.15.03-2.15.05 are known-broken with SRW — install an earlier or later one.
