@@ -144,3 +144,17 @@ boundary functions are done; the remaining work is the 806 unnamed game/engine f
 
 Next sensible step: walk the call graph down from `WinMain_` (0x412b80) to pick subsystems by
 boundary rather than by address.
+
+### Call-graph walk (step 2)
+
+```
+port\ghidra\make_symbol_map.py         -> out/shim_symbols.csv (241 boundary symbols -> subsystem)
+port\ghidra\run_calltree.bat           -> calltree_nodes.csv / calltree_edges.csv
+port\ghidra\run_annotate.bat           -> annotation.csv (string/xref evidence for top functions)
+```
+
+Result and the caveats that matter: **`port/ghidra/subsystem_map.md`**. Short version: 743 of
+1,335 functions are reachable from `WinMain_` (264 KB), 578 of those are pure engine logic
+(163 KB), and the walk is blind to indirect calls — so "unreachable" means "unknown route",
+not "unused". First decompilation target: `0x430500` (5.8 KB, 38 callees, directly under
+`WinMain_`).
