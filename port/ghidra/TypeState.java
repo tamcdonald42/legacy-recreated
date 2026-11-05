@@ -76,6 +76,22 @@ public class TypeState extends GhidraScript {
                 .addDataType(gs, DataTypeConflictHandler.REPLACE_HANDLER);
         println("enum GameState registered with " + seen.length + " members");
 
+        // --- function names established from the decompiles --------------------
+        Object[][] fns = new Object[][] {
+            {0x428370, "ClearObjTables"},   // zeroes all four counts
+            {0x428390, "BuildObjTables"},   // memset 0xbe8 per slot, slot[0]=object ptr
+            {0x428ec0, "ActivateObject"},   // sets active bit, scales a value by a 0-100 pct
+            {0x4299c0, "StartSlotEffects"}, // starts animations on slot sub-structs
+            {0x40e900, "StartAnimation"},   // frame lookup (stride 0x230) + append to list
+        };
+        for (Object[] fn : fns) {
+            ghidra.program.model.listing.Function f =
+                    currentProgram.getFunctionManager().getFunctionAt(addr((Integer) fn[0]));
+            if (f == null) { println("  no function at " + fn[0]); continue; }
+            f.setName((String) fn[1], ghidra.program.model.symbol.SourceType.USER_DEFINED);
+            println("  named function " + f.getEntryPoint() + " -> " + f.getName());
+        }
+
         // --- object tables (established from FUN_00430500's update phases) -----
         // Each count is walked together with one base array; the base of each slot
         // holds a pointer to the object itself. Pairing is documented in the finding.

@@ -38,9 +38,15 @@ public class Decompile extends GhidraScript {
 
     @Override
     public void run() throws Exception {
-        String[] args = getScriptArgs();
-        long addr = Long.parseLong((args.length > 0 ? args[0] : "0x430500").replace("0x", ""), 16);
-        int timeout = (args.length > 1) ? Integer.parseInt(args[1]) : 180;
+        java.util.List<String> specs = new java.util.ArrayList<>();
+        for (String a0 : getScriptArgs()) for (String piece : a0.split(","))
+            if (!piece.trim().isEmpty()) specs.add(piece.trim());
+        if (specs.isEmpty()) specs.add("0x430500");
+        for (String spec : specs) decompileOne(Long.parseLong(spec.replace("0x", ""), 16));
+    }
+
+    private void decompileOne(long addr) throws Exception {
+        int timeout = 180;
 
         Address a = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(addr);
         FunctionManager fm = currentProgram.getFunctionManager();
