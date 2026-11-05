@@ -1,95 +1,93 @@
-# Finding: the engine is a state machine, and `0x430500` is a state handler
+# Finding: the engine is a two-level state machine
 
 Decompiled `FUN_00430500` and its caller `WinMain_` (`0x412b80`) to answer one question:
 can this engine be cut into chunks, or is it spaghetti?
 
-Answer: **clean state machine. Natural seams exist.**
+Answer: **two-level state machine, clean seams.** `g_gameState` picks the mode; `g_subState`
+is the phase within it.
 
-## The dispatch, from `WinMain_` (546 lines of C)
+## Level 1 — `WinMain_` (546 lines of C)
 
 ```c
 if (g_shutdown == 0) {
     ...
-    if (g_gameState == STATE_2) {
-        FUN_004156a0();                       /* state 2  -> other handler */
-    }
-    else if (g_gameState - STATE_3 < 3) {     /* states 3, 4, 5 */
-        FUN_00430500(iVar4, iVar8);           /* <<< the in-game handler */
-    }
+    if (g_gameState == STATE_2)          { FUN_004156a0(); }
+    else if (g_gameState - STATE_3 < 3)  { FUN_00430500(iVar4, iVar8); }   /* states 3,4,5 */
     FUN_004046e0();
-    ...
 }
 ```
 
-`WinMain_` is init + per-frame dispatch on the game-state global; `FUN_00430500` handles
-**states 3/4/5** and internally switches again on the same variable (cases 0, 1, 2, 3, 4),
-writing `g_gameState = STATE_5` on three paths and `= STATE_4` at the tail.
+Other states gating behaviour in `WinMain_`: `STATE_11`, `STATE_13`, `STATE_14`, plus
+`(int)g_gameState < 6` before a `FUN_004068c0` call — so 0–5 are one family, 11/13/14 another.
 
-Other states seen in `WinMain_`: `STATE_11` (`0xb`) and `STATE_14` (`0xe`) gate cursor
-handling, `STATE_13` (`0xd`) gates `FUN_004046e0`, and `(int)g_gameState < 6` gates a
-`FUN_004068c0` call — so 0–5 are one family and 11/13/14 another.
-
-## Typing pass applied (`port/ghidra/TypeState.java`)
-
-| was | now |
-|---|---|
-| `DAT_004ae978` (inferred pointer) | `g_gameState` typed `enum GameState` |
-| `DAT_004ae960` | `g_shutdown` typed `int` |
-
-`GameState` has neutral members `STATE_0 … STATE_5, STATE_11, STATE_13, STATE_14` — numbers
-only, because the meanings are not established. **Do not invent names for states** until the
-handlers are read; a wrong enum name is worse than no name.
-
-### What it fixed
-
-`WinMain_` now reads as a state machine:
+## Level 2 — `FUN_00430500` (1,090 lines of C) dispatches on `g_subState`
 
 ```c
-if (g_gameState == STATE_1) { ... }
-if (g_gameState != STATE_13) { ... }
-if ((int)g_gameState < 6) { ... }
-if (g_gameState == STATE_2) { FUN_004156a0(); }
-else if (g_gameState - STATE_3 < 3) { FUN_00430500(iVar4, iVar8); }
+if (g_gameState == STATE_5) {
+    switch ((int *)(g_subState - SUB_8)) {      /* phases 8, 9, 10, 12 */
+      case 0: ...    /* = SUB_8  */
+      case 1: ...    /* = SUB_9  */
+      case 2: ...    /* = SUB_10 */
+      case 4: ...    /* = SUB_12 */
+    }
+}
 ```
 
-26 changed lines in `FUN_00430500`, 64 in `WinMain_`, all of them names rather than structure.
+Transitions actually written inside the function: `SUB_0, SUB_2, SUB_3, SUB_4 (x2), SUB_5,
+SUB_6, SUB_7, SUB_8 (x2), SUB_9, SUB_12` — a real phase machine, not a flat switch.
 
-### What it did *not* fix
+## Typing applied (`port/ghidra/TypeState.java`)
 
-`FUN_00430500` is still exactly 1,089 lines, and its cases still render as
-`case (int *)0x0:` … `case (int *)0x4:`. Reason: the switch operand is the **pointer-typed
-local** `piVar9`, not the global —
+| was | now | type |
+|---|---|---|
+| `DAT_004ae978` | `g_gameState` | `enum GameState` (`STATE_0…5, 11, 13, 14`) |
+| `DAT_004af898` | `g_subState` | `enum SubState` (`SUB_0…SUB_15`) |
+| `DAT_004ae960` | `g_shutdown` | `int` (provisional — see below) |
 
-```c
-piVar9 = (int *)(g_gameState - STATE_5);
-switch (piVar9) { case (int *)0x0: ... }
-```
+Member names are numbers only. Do not invent semantics for a state until its handler is read.
 
-Typing the global cannot fix that. The remaining lever is retyping the *decompiler variable*
-(GUI: right-click `piVar9` → Retype → `int`, then re-decompile), which is per-decompilation
-and not currently scripted. Until then read it as `g_gameState - STATE_5 == 0` → state 5.
+## Result of the typing pass
 
-## Open question — do not trust the name `g_shutdown`
+- `WinMain_` reads as a dispatcher; `FUN_00430500`'s conditions and assignments now read as
+  `g_subState == SUB_5`, `g_subState = SUB_9`.
+- `FUN_00430500` line count is unchanged (1,090 vs 1,089) — the typing was about legibility,
+  not shrinkage.
+- **The `case (int *)0x0:` labels survive** and this was attacked directly, see next section.
 
-The evidence is contradictory:
+## Negative result: retyping the switch variable does not fix the cases
+
+Hypothesis was that the switch operand was the named local `piVar9` (`int *`), so retyping it
+to `int` would yield `case 0:`. **Tested and it does not work.**
+
+- `piVar9 → int`: 1,089 → 1,091 lines, still 8/8 pointer cases, and the retype renamed the
+  variable throughout. Reverted to `int *`.
+- Cause: there is no named switch variable. Ghidra emits the operand inline —
+  `switch((int *)(g_subState - SUB_8))` — so the cast comes from the decompiler's own type
+  inference for the jump-table value, not from any symbol you can retype.
+- Only remaining lever is the GUI's *Retype switch variable* action (not scripted here), or
+  simply reading `case 0` as `SUB_8`.
+
+## Open question — `g_shutdown` is provisional
+
+Contradictory evidence:
 
 - `if (g_shutdown == 0) { <game logic + dispatch> }` → logic runs when the flag is **0**
-- `if ((DAT_004af014 == 0) || (g_shutdown != 0)) break;` → breaks when it is **non-zero**
+- `if (DAT_004af014 == 0 || g_shutdown != 0) break;` → stops when it is **non-zero**
 - `} while (g_shutdown != 0);` → *continues* while it is **non-zero** (line 299)
 
-Three sites say "non-zero = stop/quit", one loop says the opposite. Either that `do/while`
-is an artifact of an optimised loop, or it is a restart wrapper rather than the main loop.
-The name is provisional — verify against the running recomp before building on it.
+Three sites read "non-zero = quit", one loop reads the opposite. Either that loop is an
+optimised-loop artifact or a restart wrapper. Verify against the running recomp before
+building on the name.
 
 ## Next steps
 
-1. Read one `case` of `FUN_00430500` at a time; do not hold 1,089 lines in your head.
-2. `FUN_004156a0` (3.4 KB, `STATE_2`) is the natural second target — the other half of the
-   dispatcher, and a check that the pattern generalises.
-3. Resolve the `g_shutdown` inversion, then rename it properly.
-4. Name the object table: `DAT_004af8cc/d0/c4/c8` + `DAT_004c90a0` walk as count/pointer pairs.
+1. Read one phase at a time — `SUB_8 → SUB_9 → SUB_10 → SUB_12` is the in-game cycle.
+2. `FUN_004156a0` (3.4 KB, `STATE_2`) — the other half of level 1; confirms the pattern.
+3. Name the object table: `DAT_004af8cc/d0/c4/c8` + `DAT_004c90a0` walk as count/pointer pairs.
+4. Resolve the `g_shutdown` inversion.
 
 ## Artifacts
 
-`work/ghidra-out/decomp_430500.c`, `decomp_412b80.c`, plus `before/` snapshots taken before the
-typing pass. Scripts: `port/ghidra/{Decompile,TypeState}.java`.
+`work/ghidra-out/`: `decomp_430500.c` (post-typing), `decomp_00430500_retyped.c`,
+`decomp_412b80.c`, `before/` snapshots. Scripts in `port/ghidra/`:
+`Decompile.java`, `TypeState.java`, `RetypeSwitch.java` (+ matching `run_*.bat`).
