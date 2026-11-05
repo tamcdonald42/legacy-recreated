@@ -1,4 +1,4 @@
-# Septerra Core: The Legacy Recreated
+# The Legacy Recreated
 
 An unofficial decompilation workbench for **Septerra Core 1.04** (1999, GOG build) — working
 notes and Ghidra tooling for turning the shipped executable into a readable, eventually
