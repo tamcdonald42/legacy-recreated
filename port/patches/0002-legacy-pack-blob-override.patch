@@ -1,0 +1,229 @@
+diff --git a/games/Septerra Core/SR-Septerra/Game-DataFiles.c b/games/Septerra Core/SR-Septerra/Game-DataFiles.c
+index 1221492..70e46d1 100644
+--- a/games/Septerra Core/SR-Septerra/Game-DataFiles.c	
++++ b/games/Septerra Core/SR-Septerra/Game-DataFiles.c	
+@@ -76,8 +76,148 @@ typedef struct
+     uint32_t Offset;        // current offset in record
+     int32_t NewOffset;      // new offset
+     int32_t NewWhence;      // whence of new offset
++    FILE *PackFile;         // legacy pack override (blob level), NULL = normal
++    uint32_t PackSize;      // size of the override blob
+ } RecordInfo;
+ 
++/* --------------------------------------------------------------------------
++ * Legacy pack override (blob level).
++ *
++ * Enabled by setting LEGACY_PACK_DIR. A record whose key has a file at
++ *   <dir>/blobs/<key>.bin      (8 or 1..8 lowercase hex digits, no 0x)
++ * is read from that file instead of the database, with the pack file's own
++ * size used for RecordGetSize. Anything absent falls through to the archive.
++ *
++ * This is the v0 override point from port/docs/pack_format.md: whole records
++ * only, no decompiled code required. Set LEGACY_PACK_TRACE=1 to log every key
++ * the game opens, which is how you discover keys to override.
++ * -------------------------------------------------------------------------- */
++static char LegacyPackDir[256];
++static int  LegacyPackState = 0;   /* 0 = not initialised, 1 = enabled, -1 = off */
++
++static void LegacyPackInit(void)
++{
++    const char *env = getenv("LEGACY_PACK_DIR");
++    LegacyPackState = -1;
++    if (env == NULL || env[0] == '\0') return;
++
++    /* tolerate quoting and a trailing separator: set LEGACY_PACK_DIR="D:\packs\" */
++    {
++        const char *src = env;
++        size_t n;
++
++        while (*src == '"' || *src == '\'') src++;
++        snprintf(LegacyPackDir, sizeof(LegacyPackDir), "%s", src);
++        n = strlen(LegacyPackDir);
++        while (n > 0 && (LegacyPackDir[n - 1] == '"' || LegacyPackDir[n - 1] == '\'' ||
++                         LegacyPackDir[n - 1] == '\\' || LegacyPackDir[n - 1] == '/'))
++            LegacyPackDir[--n] = '\0';
++    }
++    LegacyPackState = 1;
++    eprintf("legacy-pack: enabled, dir=%s\n", LegacyPackDir);
++}
++
++static int LegacyPackTrace(void)
++{
++    const char *env = getenv("LEGACY_PACK_TRACE");
++    return (env != NULL && env[0] != '\0' && env[0] != '0');
++}
++
++static const char *LegacyPackDumpDir(void)
++{
++    static char DumpDir[256];
++
++    if (DumpDir[0] != '\0') return DumpDir;
++
++    {
++        const char *env = getenv("LEGACY_PACK_DUMP");
++        const char *src;
++        size_t n;
++
++        if (env == NULL || env[0] == '\0') return NULL;
++
++        src = env;
++        while (*src == '"' || *src == '\'') src++;
++        snprintf(DumpDir, sizeof(DumpDir), "%s", src);
++        n = strlen(DumpDir);
++        while (n > 0 && (DumpDir[n - 1] == '"' || DumpDir[n - 1] == '\'' ||
++                         DumpDir[n - 1] == '\\' || DumpDir[n - 1] == '/'))
++            DumpDir[--n] = '\0';
++        if (DumpDir[0] == '\0') return NULL;
++        eprintf("legacy-pack: dump enabled, dir=%s\n", DumpDir);
++    }
++    return DumpDir;
++}
++
++/* Read a record once, write it out as <dir>/<key>.bin, then rewind it for the caller.
++ * Only runs when LEGACY_PACK_DUMP is set; this is how pack authors obtain the
++ * originals to build a pack from. */
++static void LegacyPackDumpRecord(int32_t RecordHandle, uint32_t RecordKey, uint32_t Size)
++{
++    const char *Dir = LegacyPackDumpDir();
++    char path[512];
++    uint8_t *Buffer;
++    FILE *Out;
++    uint32_t Read;
++
++    if (Dir == NULL || Size == 0) return;
++
++    Buffer = malloc(Size);
++    if (Buffer == NULL) return;
++
++    Read = RecordRead(RecordHandle, Buffer, Size);
++    RecordSeek(RecordHandle, 0, 0);
++
++    snprintf(path, sizeof(path), "%s/%08x.bin", Dir, RecordKey);
++    Out = fopen(path, "wb");
++    if (Out != NULL)
++    {
++        if (Read > 0) fwrite(Buffer, 1, Read, Out);
++        fclose(Out);
++        eprintf("legacy-pack: dumped key 0x%x (%u bytes) -> %s\n", RecordKey, Read, path);
++    }
++    else
++    {
++        eprintf("legacy-pack: dump write failed %s (errno %d)\n", path, errno);
++    }
++
++    free(Buffer);
++}
++
++static FILE *LegacyPackOpenBlob(uint32_t RecordKey, uint32_t *Size)
++{
++    char path[512];
++    FILE *File;
++    long Length;
++
++    if (LegacyPackState == 0) LegacyPackInit();
++    if (LegacyPackState != 1) return NULL;
++
++    snprintf(path, sizeof(path), "%s/blobs/%08x.bin", LegacyPackDir, RecordKey);
++    File = fopen(path, "rb");
++    if (File == NULL)
++    {
++        int FirstError = errno;
++        snprintf(path, sizeof(path), "%s/blobs/%x.bin", LegacyPackDir, RecordKey);
++        File = fopen(path, "rb");
++        if (File == NULL)
++        {
++            if (LegacyPackTrace())
++                eprintf("legacy-pack: miss %s (errno %d)\n", path, FirstError);
++            return NULL;
++        }
++    }
++
++    if (fseek(File, 0, SEEK_END) != 0) { eprintf("legacy-pack: seek failed %s (errno %d)\n", path, errno); fclose(File); return NULL; }
++    Length = ftell(File);
++    if (Length < 0) { eprintf("legacy-pack: tell failed %s\n", path); fclose(File); return NULL; }
++    fseek(File, 0, SEEK_SET);
++
++    *Size = (uint32_t)Length;
++    eprintf("legacy-pack: override key 0x%x (%u bytes) <- %s\n", RecordKey, *Size, path);
++    return File;
++}
++
+ typedef struct
+ {
+     uint32_t RecordKey;          // record ID
+@@ -448,6 +588,18 @@ int32_t CCALL RecordOpen(uint32_t RecordKey)
+     RecordBuffer[result].NewOffset = -1;
+     RecordBuffer[result].NewWhence = -1;
+ 
++    {
++        uint32_t PackSize = 0;
++        FILE *PackFile = LegacyPackOpenBlob(RecordKey, &PackSize);
++        RecordBuffer[result].PackFile = PackFile;
++        RecordBuffer[result].PackSize = PackSize;
++        if (PackFile == NULL && LegacyPackTrace())
++            eprintf("legacy-pack: trace key 0x%x (size %u, no override)\n", RecordKey,
++                    IndexFileBuffer[IndexNumber].UncompressedSize);
++        if (PackFile == NULL)
++            LegacyPackDumpRecord(result, RecordKey, IndexFileBuffer[IndexNumber].UncompressedSize);
++    }
++
+     // finally
+ #ifdef _WIN32
+     LeaveCriticalSection(&CriticalSection);
+@@ -591,6 +743,30 @@ uint32_t CCALL RecordRead(int32_t RecordHandle, uint8_t *ReadBuffer, uint32_t Nu
+     RecordInfo *Record = &(RecordBuffer[RecordHandle]);
+     result = 0;
+ 
++    if (Record->PackFile != NULL)
++    {
++        uint32_t Position;
++
++        switch (Record->NewWhence)
++        {
++            case 0:  Position = (uint32_t)Record->NewOffset; break;
++            case 1:  Position = Record->Offset + (uint32_t)Record->NewOffset; break;
++            case 2:  Position = Record->PackSize + (uint32_t)Record->NewOffset; break;
++            default: Position = Record->Offset; break;
++        }
++        Record->NewWhence = -1;
++        Record->NewOffset = -1;
++
++        if (Position > Record->PackSize) Position = Record->PackSize;
++        if (Position + NumberOfBytes > Record->PackSize) NumberOfBytes = Record->PackSize - Position;
++
++        fseek(Record->PackFile, (long)Position, SEEK_SET);
++        result = (uint32_t)fread(ReadBuffer, 1, NumberOfBytes, Record->PackFile);
++        Record->Offset = Position + result;
++
++        return result;
++    }
++
+ #ifdef _WIN32
+     EnterCriticalSection(&CriticalSection);
+ #else
+@@ -695,6 +871,16 @@ uint32_t CCALL RecordRead(int32_t RecordHandle, uint8_t *ReadBuffer, uint32_t Nu
+ // sub_445ec0
+ void CCALL RecordClose(int32_t RecordHandle)
+ {
++    {
++        RecordInfo *PackRecord = &(RecordBuffer[RecordHandle]);
++        if (PackRecord->PackFile != NULL)
++        {
++            fclose(PackRecord->PackFile);
++            PackRecord->PackFile = NULL;
++            PackRecord->PackSize = 0;
++        }
++    }
++
+ #ifdef DEBUG_DATABASE
+     eprintf("RecordClose - %i - ", RecordHandle);
+ #endif
+@@ -736,6 +922,8 @@ uint32_t CCALL RecordGetSize(int32_t RecordHandle)
+     RecordInfo *Record = &(RecordBuffer[RecordHandle]);
+     result = 0;
+ 
++    if (Record->PackFile != NULL) return Record->PackSize;
++
+ #ifdef _WIN32
+     EnterCriticalSection(&CriticalSection);
+ #else

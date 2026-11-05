@@ -126,7 +126,47 @@ Rules the loader enforces:
   frame — a visibly broken sprite is better than a mysteriously wrong one.
 - Loading is all-or-nothing per frame; packs can be disabled by config without touching files.
 
-## 6. Staged capability — what ships when
+## 6. v0 implemented — `port/patches/0002-legacy-pack-blob-override.patch`
+
+The blob layer is real code in `Game-DataFiles.c` now, not a proposal. Three environment
+variables drive it, all read once at first record open:
+
+| variable | effect |
+|---|---|
+| `LEGACY_PACK_DIR` | directory to read overrides from; unset = stock behaviour |
+| `LEGACY_PACK_TRACE=1` | log every record key the game opens, with size and whether it was overridden |
+| `LEGACY_PACK_DUMP` | write every opened record to `<dir>/<key>.bin` — this is how you get originals to build a pack from |
+
+Override lookup is `<dir>/blobs/<key>.bin`, key as 8 lowercase hex digits, zero-padded
+(`05000001.bin`). Unpadded names are tried as a fallback. Quoted values and trailing
+separators are tolerated, because `set LEGACY_PACK_DIR="D:\packs\"` is what people type.
+
+### What is verified
+
+- **Substitution happens.** Overriding key `0x5000001` with a 4,630-byte file produced
+  `legacy-pack: override key 0x5000001 (4630 bytes) <- ...\05000001.bin` and the process kept
+  running. The record came from the pack, not the archive.
+- **Extraction works.** A 12-second headless run with `LEGACY_PACK_DUMP` wrote **225 records,
+  56 MB**, with sizes matching the archive index (`0x2000009` → 2,502,586 bytes,
+  `0x200000b` → 19,476,566 bytes).
+
+### What is not verified
+
+- **Visual correctness.** Everything above ran in a session with no display. Nobody has yet
+  eyeballed a replaced sprite; that needs a desktop run with a real pack.
+- **Key → content mapping.** The trace gives keys and sizes, not names. The dumped files are
+  raw blobs; which one is which sprite is still an open question (see section 7).
+
+### Practical loop this enables
+
+```
+LEGACY_PACK_DUMP=D:\dump   SR-Septerra.exe     # 1. extract what the game loads
+                                # 2. find the blob you want (by size, by eye, by editing)
+                                # 3. edit it, write D:\pack\blobs\<key>.bin
+LEGACY_PACK_DIR=D:\pack    SR-Septerra.exe     # 4. run with the override, trace confirms it
+```
+
+## 7. Staged capability — what ships when
 
 | stage | override point | needs |
 |---|---|---|
@@ -137,7 +177,7 @@ Rules the loader enforces:
 v0 is deliberately first: it needs no decompiled code, only a lookup in the record reader, and
 it proves the key scheme against real content.
 
-## 7. Open questions *(open)*
+## 8. Open questions *(open)*
 
 - **Record key stability.** Keys arrive as integers (`RecordTryOpen_asm2c(key)`); how they are
   derived from names (`GetRecordName_`, 0x4106e0) is not established. Until it is, blob-level
@@ -149,7 +189,7 @@ it proves the key scheme against real content.
 - **Palette identity.** Whether a frame's palette is authoritative per frame or shared per sprite
   set decides whether v1 packs may recolour independently.
 
-## 8. Legal
+## 9. Legal
 
 This document specifies a **format**, not assets. Any pack, upscaled or original, is derived from
 the game's art and cannot be redistributed. The project ships the loader and, eventually, the
