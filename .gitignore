@@ -10,7 +10,7 @@ jdk-21/
 septerra_core/
 septerra_extracted/
 
-# Third-party libs pulled down by C:\Users\Admin\get_*.py
+# Third-party libs pulled down by the get_*.py helpers
 # (SDL2, mpg123, libquicktime, lqt stubs, unshield)
 libs/
 

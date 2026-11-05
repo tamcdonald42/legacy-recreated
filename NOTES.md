@@ -31,7 +31,7 @@ H:\ghidra\port\build\build.bat               -> SR-Septerra.exe
 link with MSVC). Give each script something with a console: they call `vcvarsall.bat`.
 
 Prerequisites: MSVC BuildTools 2022 (x86), NASM 2.16.03 at `libs\nasm`, Python
-(`C:\Users\Admin\miniconda3\python.exe`), SDL2 2.30.9 + mpg123 dev files under `libs\`.
+(`%USERPROFILE%\miniconda3\python.exe`), SDL2 2.30.9 + mpg123 dev files under `libs\`.
 
 ### The five things that break it
 
@@ -80,7 +80,7 @@ The earlier retail CD was **1.02**: 610362 bytes, PE32, **no `.reloc` section** 
 
 ## Do not do this again
 
-`C:\Users\Admin\fix_relocations.py` rewrote the target column by reading the dword at each
+`fix_relocations.py` rewrote the target column by reading the dword at each
 fixup address in the 1.02 exe. That does not recover a relocation table — 30.9% of "targets"
 land inside the image versus 86.7% in the upstream table, with gems like
 `0x401017 -> 0xc0850049` (a `mov` encoding, not an address). Reproduced for the record as

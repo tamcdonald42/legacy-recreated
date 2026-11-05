@@ -19,7 +19,9 @@ set "XD=%GAME%\x86"
 set "RUN=%ROOT%\work\srw-run2"
 set "NASMDIR=%ROOT%\libs\nasm\nasm-2.16.03"
 set "NASM=%NASMDIR%\nasm.exe"
-set "PY=C:\Users\Admin\miniconda3\python.exe"
+rem python: override with  set "PY=C:\path\to\python.exe"
+if not defined PY set "PY=%USERPROFILE%\miniconda3\python.exe"
+if not exist "%PY%" set "PY=python"
 set "PATH=%NASMDIR%;%PATH%"
 
 rem ---- 1. static recompile: 1.04 exe + config -> Septerra.asm + seg*.inc ------
