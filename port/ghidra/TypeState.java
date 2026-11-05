@@ -76,16 +76,41 @@ public class TypeState extends GhidraScript {
                 .addDataType(gs, DataTypeConflictHandler.REPLACE_HANDLER);
         println("enum GameState registered with " + seen.length + " members");
 
+        // --- object tables (established from FUN_00430500's update phases) -----
+        // Each count is walked together with one base array; the base of each slot
+        // holds a pointer to the object itself. Pairing is documented in the finding.
+        Object[][] tabs = new Object[][] {
+            {0x4af8cc, "g_objCount0"}, {0x4bf040, "g_objTable0"},
+            {0x4af8d0, "g_objCount1"}, {0x4c90a0, "g_objTable1"},
+            {0x4af8c4, "g_objCount2"}, {0x4c9100, "g_objTable2"},
+            {0x4af8c8, "g_objCount3"}, {0x4c13f8, "g_objTable3"},
+        };
+        for (Object[] t : tabs) {
+            rename(addr((Integer) t[0]), (String) t[1]);
+        }
+
+        // --- enum SubState (the second state variable, DAT_004af898) -----------
+        // FUN_00430500 switches on (g_subState - 8) and (g_subState - 1): a phase
+        // counter within the in-game state. Values observed 1..10; range 0..15 typed.
+        EnumDataType ss = new EnumDataType("SubState", 4);
+        for (int v = 0; v <= 15; v++) ss.add("SUB_" + v, v);
+        DataType ssReg = currentProgram.getDataTypeManager()
+                .addDataType(ss, DataTypeConflictHandler.REPLACE_HANDLER);
+        println("enum SubState registered with 16 members");
+
         // --- renames ----------------------------------------------------------
         println("renaming globals:");
         rename(stateAddr, "g_gameState");
-        rename(shutAddr, "g_shutdown");
+        rename(shutAddr, "g_flag_ae960");   // never written by analysed code; name kept neutral
+        Address subAddr = addr(0x4af898);
+        rename(subAddr, "g_subState");
 
         // --- types ------------------------------------------------------------
         println("applying types:");
         applyType(stateAddr, registered, 4);
         DataType int4 = ghidra.program.model.data.IntegerDataType.dataType;
         applyType(shutAddr, int4, 4);
+        applyType(addr(0x4af898), ssReg, 4);
 
         println("TYPESTATE done");
     }
