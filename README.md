@@ -1,4 +1,6 @@
-# Septerra Core 1.04 — decompilation workbench
+# Septerra Core: The Legacy Recreated
+
+An unofficial decompilation workbench for **Septerra Core 1.04** (1999, GOG build).
 
 Working notes and Ghidra tooling for turning **Septerra Core 1.04** (the 1999 GOG build) into a
 readable, eventually portable code base. The runnable target is the static-recompilation build
@@ -88,6 +90,15 @@ work/                     scratch: SRW runs, Ghidra project, decompiled output (
 Readable so far: the state machine, object/effect/slot layout, spawn and combat registration.
 Not started: graphics, audio, input, script interpreter, menus. No function has been ported to C
 yet — the immediate goal is coverage of the per-frame path, not source yet.
+
+## Trademark & legal
+
+Unofficial fan research project. Not affiliated with, endorsed by, or sponsored by the rights
+holders of Septerra Core. "Septerra Core" is used only to identify the software being studied.
+
+This repository ships **no game data, no game executable, and no decompiled game code**. You
+must own a copy of the game to use any of it. Nothing here enables playing the game without
+one.
 
 ## Licence
 
