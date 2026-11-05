@@ -158,3 +158,11 @@ Result and the caveats that matter: **`port/ghidra/subsystem_map.md`**. Short ve
 (163 KB), and the walk is blind to indirect calls — so "unreachable" means "unknown route",
 not "unused". First decompilation target: `0x430500` (5.8 KB, 38 callees, directly under
 `WinMain_`).
+
+### Typing pass on the state machine
+
+`port/ghidra/run_typestate.bat` (TypeState.java) renames `DAT_004ae978` -> `g_gameState`
+(enum `GameState`, members STATE_0..STATE_5/11/13/14) and `DAT_004ae960` -> `g_shutdown` (int,
+name provisional — see the finding doc for the contradictory evidence). WinMain_ now reads as
+a dispatcher. It does **not** shrink `FUN_00430500`: its switch operand is a pointer-typed
+local, so cases still render as `(int *)0x0..0x4`.

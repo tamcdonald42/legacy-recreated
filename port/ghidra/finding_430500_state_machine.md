@@ -3,80 +3,93 @@
 Decompiled `FUN_00430500` and its caller `WinMain_` (`0x412b80`) to answer one question:
 can this engine be cut into chunks, or is it spaghetti?
 
-Answer: **clean state machine. Natural seams exist.** The new globals worth naming immediately
-are `DAT_004ae978` (game state) and `DAT_004ae960` (shutdown flag).
+Answer: **clean state machine. Natural seams exist.**
 
 ## The dispatch, from `WinMain_` (546 lines of C)
 
 ```c
-if (DAT_004ae960 == 0) {                      /* not shutting down */
+if (g_shutdown == 0) {
     ...
-    if (DAT_004ae978 == 2) {
+    if (g_gameState == STATE_2) {
         FUN_004156a0();                       /* state 2  -> other handler */
     }
-    else if (DAT_004ae978 - 3U < 3) {         /* states 3, 4, 5 */
-        FUN_00430500(iVar4, iVar8);           /* <<< the function we decompiled */
+    else if (g_gameState - STATE_3 < 3) {     /* states 3, 4, 5 */
+        FUN_00430500(iVar4, iVar8);           /* <<< the in-game handler */
     }
     FUN_004046e0();
     ...
 }
 ```
 
-So `WinMain_` is init + per-frame dispatch on the game-state global; `FUN_00430500` handles
-**states 3/4/5**, and internally switches again on the same variable:
+`WinMain_` is init + per-frame dispatch on the game-state global; `FUN_00430500` handles
+**states 3/4/5** and internally switches again on the same variable (cases 0, 1, 2, 3, 4),
+writing `g_gameState = STATE_5` on three paths and `= STATE_4` at the tail.
+
+Other states seen in `WinMain_`: `STATE_11` (`0xb`) and `STATE_14` (`0xe`) gate cursor
+handling, `STATE_13` (`0xd`) gates `FUN_004046e0`, and `(int)g_gameState < 6` gates a
+`FUN_004068c0` call — so 0–5 are one family and 11/13/14 another.
+
+## Typing pass applied (`port/ghidra/TypeState.java`)
+
+| was | now |
+|---|---|
+| `DAT_004ae978` (inferred pointer) | `g_gameState` typed `enum GameState` |
+| `DAT_004ae960` | `g_shutdown` typed `int` |
+
+`GameState` has neutral members `STATE_0 … STATE_5, STATE_11, STATE_13, STATE_14` — numbers
+only, because the meanings are not established. **Do not invent names for states** until the
+handlers are read; a wrong enum name is worse than no name.
+
+### What it fixed
+
+`WinMain_` now reads as a state machine:
 
 ```c
-switch ((int)DAT_004ae978) {
-  case 0: ...           /* line 62/966  */
-  case 1: ...           /* line 81/1000 */
-  case 2: ...           /* line 136/1050 */
-  case 3: ...           /* label switchD_00430544_caseD_3, line 1068 */
-  case 4: ... DAT_004ae978 = 4;
-}
+if (g_gameState == STATE_1) { ... }
+if (g_gameState != STATE_13) { ... }
+if ((int)g_gameState < 6) { ... }
+if (g_gameState == STATE_2) { FUN_004156a0(); }
+else if (g_gameState - STATE_3 < 3) { FUN_00430500(iVar4, iVar8); }
 ```
 
-State writes found inside the function: `DAT_004ae978 = 5` at lines 453, 709, 916 and
-`= 4` at the tail. Reads of `DAT_004ae960`, `DAT_004af164`, `DAT_004ae838`, `DAT_004ae9e8`
-gate behaviour, and `DAT_004af8cc` / `DAT_004af8d0` / `DAT_004af8c4` / `DAT_004af8c8` look
-like a count + pointer array walked by index.
+26 changed lines in `FUN_00430500`, 64 in `WinMain_`, all of them names rather than structure.
 
-## Readability, measured
+### What it did *not* fix
 
-| | `FUN_00430500` | `WinMain_` |
-|---|---|---|
-| C lines | 1,089 (39 KB) | 546 (18.5 KB) |
-| globals touched | 76 | — |
-| distinct callees | 42 | — |
-| `if` / `else` | 156 / 21 | 64 / 7 |
-| `goto` / labels | 21 / 6 | 9 / 2 |
-| `unaff_` / `in_stack_` noise | **0 / 0** | 0 |
+`FUN_00430500` is still exactly 1,089 lines, and its cases still render as
+`case (int *)0x0:` … `case (int *)0x4:`. Reason: the switch operand is the **pointer-typed
+local** `piVar9`, not the global —
 
-Verdict on readability: **middling but honest.** No `unaff_` garbage, no stack-frame
-mangling — Ghidra did well. The noise that hurts is:
+```c
+piVar9 = (int *)(g_gameState - STATE_5);
+switch (piVar9) { case (int *)0x0: ... }
+```
 
-- **Missing types everywhere.** The state variable decompiles as `case (int *)0x0:` and
-  `(int *)(DAT_004ae978 + -5)`, because `DAT_004ae978` is inferred as a pointer. Params are
-  `undefined4`, so the signature is `int * __fastcall FUN_00430500(undefined4, undefined4)`.
-- **The jump table is emitted twice** — cases appear around line 62–203 *and* again at
-  966–1080, because Ghidra split flow at the `switchD_` labels.
-- **41 `do { … } while` loops are inlined `memcpy`/`memset`**, not real loops. Ghidra decoded
-  the compiler's unrolled copies literally.
-- `extraout_ECX_00` … `extraout_ECX_09` — call-clobbered register spill, cosmetic.
+Typing the global cannot fix that. The remaining lever is retyping the *decompiler variable*
+(GUI: right-click `piVar9` → Retype → `int`, then re-decompile), which is per-decompilation
+and not currently scripted. Until then read it as `g_gameState - STATE_5 == 0` → state 5.
 
-## What to do next, in order
+## Open question — do not trust the name `g_shutdown`
 
-1. **Type the state machine first.** Rename `DAT_004ae978` → `g_gameState`, `DAT_004ae960` →
-   `g_shutdown;` define an `enum GameState { … }` and apply it. Re-decompile: the double
-   switch, the `(int *)0x0` cases and much of the `+ -5` arithmetic disappear. This is the
-   cheapest large win available, and it's now unblocked because we know what the variable is.
-2. **Name the four loop arrays** (`DAT_004af8cc/d0/c4/c8` + `DAT_004c90a0`) as a
-   count/pointer pair — they're the entity or object table.
-3. Then decompile one `case` at a time and treat each as a small function. Do not try to hold
-   1,089 lines in your head.
-4. `FUN_004156a0` (3.4 KB, state 2) is the natural second target — it's the other half of the
-   same dispatcher and will confirm the structural pattern holds.
+The evidence is contradictory:
+
+- `if (g_shutdown == 0) { <game logic + dispatch> }` → logic runs when the flag is **0**
+- `if ((DAT_004af014 == 0) || (g_shutdown != 0)) break;` → breaks when it is **non-zero**
+- `} while (g_shutdown != 0);` → *continues* while it is **non-zero** (line 299)
+
+Three sites say "non-zero = stop/quit", one loop says the opposite. Either that `do/while`
+is an artifact of an optimised loop, or it is a restart wrapper rather than the main loop.
+The name is provisional — verify against the running recomp before building on it.
+
+## Next steps
+
+1. Read one `case` of `FUN_00430500` at a time; do not hold 1,089 lines in your head.
+2. `FUN_004156a0` (3.4 KB, `STATE_2`) is the natural second target — the other half of the
+   dispatcher, and a check that the pattern generalises.
+3. Resolve the `g_shutdown` inversion, then rename it properly.
+4. Name the object table: `DAT_004af8cc/d0/c4/c8` + `DAT_004c90a0` walk as count/pointer pairs.
 
 ## Artifacts
 
-`work/ghidra-out/decomp_430500.c`, `decomp_412b80.c`, `annotation.csv`.
-Script: `port/ghidra/Decompile.java` (`-postScript Decompile.java 0x430500 300`).
+`work/ghidra-out/decomp_430500.c`, `decomp_412b80.c`, plus `before/` snapshots taken before the
+typing pass. Scripts: `port/ghidra/{Decompile,TypeState}.java`.
