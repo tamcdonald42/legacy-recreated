@@ -1,9 +1,8 @@
 # Septerra Core: The Legacy Recreated
 
-An unofficial decompilation workbench for **Septerra Core 1.04** (1999, GOG build).
-
-Working notes and Ghidra tooling for turning **Septerra Core 1.04** (the 1999 GOG build) into a
-readable, eventually portable code base. The runnable target is the static-recompilation build
+An unofficial decompilation workbench for **Septerra Core 1.04** (1999, GOG build) — working
+notes and Ghidra tooling for turning the shipped executable into a readable, eventually
+portable code base. The runnable target is the static-recompilation build
 from [M-HT/SR](https://github.com/M-HT/SR) (`SR-Septerra.exe`); the decompilation work happens
 on the **original** `septerra.exe`, which is the only thing worth decompiling.
 
