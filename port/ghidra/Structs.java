@@ -8,6 +8,7 @@ import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.IntegerDataType;
 import ghidra.program.model.data.PointerDataType;
 import ghidra.program.model.data.StructureDataType;
+import ghidra.program.model.data.ShortDataType;
 import ghidra.program.model.data.Undefined1DataType;
 import ghidra.program.model.data.UnsignedShortDataType;
 import ghidra.program.model.data.VoidDataType;
@@ -72,8 +73,35 @@ public class Structs extends GhidraScript {
         return s;
     }
 
+    /** The object itself: same animatable header as Effect, plus the object-only fields. */
+    private StructureDataType buildObj() {
+        StructureDataType o = new StructureDataType("Obj", 0x1C8, dtm);
+        put(o, 0x018, Undefined1DataType.dataType, 1, "flags0",
+                "byte flags: ActivateObject ors 8 and clears 0x1001; SUB_9 tests bit 1");
+        put(o, 0x040, new PointerDataType(VoidDataType.dataType), 4, "animRoot", "same offset as Effect::animRoot");
+        put(o, 0x044, UnsignedShortDataType.dataType, 2, "f044", null);
+        put(o, 0x05c, IntegerDataType.dataType, 4, "state", "== 4 branches in SUB_9");
+        put(o, 0x06c, IntegerDataType.dataType, 4, "f06c", null);
+        put(o, 0x0a2, ShortDataType.dataType, 2, "f0a2", "scaled by a 0-100 percentage");
+        put(o, 0x12e, IntegerDataType.dataType, 4, "f12e", "derived from f0a2, minimum 1");
+        put(o, 0x132, IntegerDataType.dataType, 4, "flags132", "ActivateObject ors 0x10000; SUB_9 tests it");
+        put(o, 0x164, new PointerDataType(VoidDataType.dataType), 4, "f164",
+                "copied into slot+4; *(f164+8) into slot+8");
+        put(o, 0x190, UnsignedShortDataType.dataType, 2, "frameIndex", "same offset as Effect::frameIndex");
+        put(o, 0x194, new PointerDataType(VoidDataType.dataType), 4, "animList", "same offset as Effect::animList");
+        put(o, 0x19c, Undefined1DataType.dataType, 1, "loopFlag", null);
+        put(o, 0x19d, Undefined1DataType.dataType, 1, "f19d", "set from *(f1a4+0xf)");
+        put(o, 0x1a4, new PointerDataType(VoidDataType.dataType), 4, "f1a4", "bytes +0xe/+0xf copied into loopFlag/f19d");
+        put(o, 0x1b0, IntegerDataType.dataType, 4, "f1b0", "zeroed by ActivateObject");
+        put(o, 0x1b4, IntegerDataType.dataType, 4, "f1b4", "zeroed by ActivateObject");
+        put(o, 0x1b8, IntegerDataType.dataType, 4, "f1b8", "zeroed by ActivateObject");
+        put(o, 0x1bc, IntegerDataType.dataType, 4, "f1bc", "zeroed by ActivateObject");
+        return o;
+    }
+
     private String ctype(DataType dt) {
         String n = dt.getName();
+        if (dt instanceof Undefined1DataType) return "unsigned char";
         if (n.equals("undefined") || n.startsWith("undefined")) return null;
         if (dt instanceof PointerDataType) return "void *";
         if (n.equals("int")) return "int";
@@ -114,34 +142,48 @@ public class Structs extends GhidraScript {
         return sb.toString();
     }
 
+    private void applyArray(long base, DataType elem, int count, String name) throws Exception {
+        Address a = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(base);
+        clearListing(a, a.add((long) count * elem.getLength() - 1));
+        try {
+            createData(a, new ArrayDataType(elem, count, elem.getLength()));
+            println("APPLIED " + elem.getName() + "[" + count + "] at " + a);
+        } catch (Exception e) {
+            println("APPLY FAILED at " + a + ": " + e.getMessage());
+        }
+        ghidra.program.model.symbol.Symbol sym = getSymbolAt(a);
+        if (sym != null) {
+            sym.setName(name, ghidra.program.model.symbol.SourceType.USER_DEFINED);
+            println("renamed " + a + " -> " + name);
+        }
+    }
+
+    private void renameData(long addr, String name) throws Exception {
+        Address a = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(addr);
+        ghidra.program.model.symbol.Symbol sym = getSymbolAt(a);
+        if (sym == null) { println("no symbol at " + a); return; }
+        sym.setName(name, ghidra.program.model.symbol.SourceType.USER_DEFINED);
+        println("renamed " + a + " -> " + name);
+    }
+
     @Override
     public void run() throws Exception {
         dtm = currentProgram.getDataTypeManager();
 
         StructureDataType effect = buildEffect();
         StructureDataType slot = buildSlot(effect);
+        StructureDataType obj = buildObj();
 
         DataType eReg = dtm.addDataType(effect, DataTypeConflictHandler.REPLACE_HANDLER);
         DataType sReg = dtm.addDataType(slot, DataTypeConflictHandler.REPLACE_HANDLER);
+        DataType oReg = dtm.addDataType(obj, DataTypeConflictHandler.REPLACE_HANDLER);
         println("STRUCT Effect size=0x" + Integer.toHexString(eReg.getLength()));
         println("STRUCT ObjSlot size=0x" + Integer.toHexString(sReg.getLength()));
+        println("STRUCT Obj size=0x" + Integer.toHexString(oReg.getLength()));
 
-        // Apply to the slot array in .bss: 0x4bf040 .. 0x4c90a0 leaves room for 13 slots.
-        Address base = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(0x4bf040L);
-        int count = 13;
-        clearListing(base, base.add((long) count * 0xBE8 - 1));
-        DataType arr = new ArrayDataType(sReg, count, sReg.getLength());
-        try {
-            createData(base, arr);
-            println("APPLIED ObjSlot[" + count + "] at " + base);
-        } catch (Exception e) {
-            println("APPLY FAILED: " + e.getMessage());
-        }
-        ghidra.program.model.symbol.Symbol sym = getSymbolAt(base);
-        if (sym != null) {
-            sym.setName("g_objSlots", ghidra.program.model.symbol.SourceType.USER_DEFINED);
-            println("renamed " + base + " -> g_objSlots");
-        }
+        applyArray(0x4bf040L, sReg, 13, "g_objSlots");                        // slot array
+        applyArray(0x4de628L, new PointerDataType(oReg), 13, "g_levelObjs");  // Obj* array
+        renameData(0x4de620L, "g_levelObjCount");
 
         new File(OUT).mkdirs();
         File h = new File(OUT + "objslot.h");
@@ -150,6 +192,8 @@ public class Structs extends GhidraScript {
             pw.println("   and StartSlotEffects (0x4299c0). Offsets verified against the disassembly. */");
             pw.println();
             pw.print(header(effect));
+            pw.println();
+            pw.print(header(obj));
             pw.println();
             pw.print(header(slot));
         }

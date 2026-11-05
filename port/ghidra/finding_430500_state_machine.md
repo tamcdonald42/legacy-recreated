@@ -116,6 +116,38 @@ typedef struct ObjSlot {           /* 0xBE8 */
 } ObjSlot;
 ```
 
+### Obj — the object's first 0x1C8 bytes are the Effect layout
+
+Every offset `ActivateObject` and `StartAnimation` touch on an object is below `0x1C8`, which
+is exactly `sizeof(Effect)`: `+0x18` (byte flags), `+0x40` animRoot, `+0x44`, `+0x5c` state,
+`+0x60`, `+0x6c`, `+0xa2` (short, scaled by a percentage), `+0x12e`, `+0x132` flags,
+`+0x164` -> slot+4, `+0x190` frameIndex, `+0x194` animList, `+0x19c`, `+0x19d`, `+0x1a4`,
+`+0x1b0..0x1bc` (four dwords zeroed). So `Obj` (0x1C8) shares the animatable header with
+`Effect` — same names at the same offsets. `port/include/objslot.h` carries all three structs.
+
+Applied: `Obj *[13]` at `0x4de628` (`g_levelObjs`), count at `0x4de620`
+(`g_levelObjCount`). `BuildObjTables` now reads `pOVar1 = g_levelObjs[uVar5]; _Dst->obj = pOVar1;`.
+
+Retyping the decompiler's locals in `ActivateObject` (`in_EAX` -> `ObjSlot *`, `iVar1` -> `Obj *`)
+turns it from offset soup into field names:
+
+```c
+Obj *pObj;  ObjSlot *in_EAX;
+pObj = in_EAX->obj;
+if (((pObj->flags132 & 0x10000U) == 0) || ((pObj->flags0 & 8) == 0)) {
+    pObj->flags132 = pObj->flags132 | 0x10000;
+    ...
+    pObj->loopFlag = *(undefined1 *)((int)pvVar1 + 0xe);
+    pObj->f19d     = *(undefined1 *)((int)pvVar1 + 0xf);
+```
+
+Two notes for anyone repeating this: relabelling a *global's* type never fixes variable-typed
+noise (only the variable's type does), and **Ghidra splits script arguments on `=`** — pass
+`var:Type`, not `var=Type`, or every assignment silently becomes two bad arguments.
+
+New detail from the retyped output: `ActivateObject` also zeroes `slot+0xB34`, a field of the
+slot beyond `activeEffect` that the struct does not name yet.
+
 ### Correction: `0x4c13f8` is not a fourth table — it is `&g_objSlots[3]`
 
 `0x4c13f8 - 0x4bf040 = 0x23B8 = 3 * 0xBE8` exactly, and the loop starting there strides
