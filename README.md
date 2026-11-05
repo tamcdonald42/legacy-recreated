@@ -72,6 +72,14 @@ Each of these is backed by disassembly or by code in the binary, not by pattern-
 `case` labels survive retyping the operand's variable because Ghidra emits the switch expression
 inline.
 
+## Asset packs
+
+`port/docs/pack_format.md` specifies the replacement-art format (draft v0.1): where art enters
+the engine (`RecordTryOpen` → `RecordRead`), the 0x230-byte animation frame record, and the
+staged capability plan — whole-blob overrides work on the current build, per-frame overrides
+need a hook, and larger-than-original art needs a scaling blit that the engine does not have.
+The format ships; the art never does.
+
 ## Layout
 
 ```
@@ -79,6 +87,7 @@ NOTES.md                  environment, build chain, every trap hit so far
 port/build/               recomp pipeline: stub libs, mpg123 import lib, build.bat
 port/ghidra/              Ghidra scripts + .bat wrappers + findings
 port/include/             engine headers derived from the binary (objslot.h)
+port/docs/                format specs (pack_format.md)
 port/patches/             the single SConstruct patch needed by the shim
 reference/SR              upstream M-HT/SR (submodule)
 work/                     scratch: SRW runs, Ghidra project, decompiled output (gitignored)
