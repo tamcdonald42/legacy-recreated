@@ -207,6 +207,40 @@ All four counts/tables live in `.bss`; only `g_gameState` (0x4ae978) and `g_flag
 throughout. Reverted. There is no named switch variable — Ghidra emits
 `switch((int *)(g_subState - SUB_8))` inline, so the cast is its own jump-table inference.
 
+## Combat lists — named by the game's own assert strings
+
+`AddCombatant` (0x428240, `FUN_00428240`) is the only writer of `g_enemyCount` and
+`g_allyCount` besides `ClearObjTables`, and it names itself:
+
+```c
+if (param_2 != 0) {                              /* ally */
+    if (9 < g_objCount3)
+        FUN_004129d0("Tell Jim you ran out of slots in the Allies Combat List",0x70);
+    memset(&g_objSlots[g_allyCount + 3],0,0xbe8);
+    g_objSlots[g_allyCount + 3].obj = obj;
+    ...
+} else {                                         /* enemy */
+    if (9 < g_objCount2)
+        FUN_004129d0("Tell Jim you ran out of slots in the Enemies Combat List",0x70);
+    memset(&g_enemySlots[g_enemyCount],0,0xbe8);
+    g_enemySlots[g_enemyCount].obj = obj;
+}
+```
+
+So, with the embedded strings as the authority:
+
+- `g_allyCount` (0x4af8c8) counts the **Allies Combat List**, capped at 10, stored in
+  `g_objSlots[3..12]` — which **confirms** slots 0–2 are reserved (the party).
+- `g_enemyCount` (0x4af8c4) counts the **Enemies Combat List**, capped at 10, stored in a
+  **second slot array** `g_enemySlots` (0x4c9100) with the same 0xBE8 stride — the earlier
+  "0xB34-byte entries" reading was wrong; 0xB34 is a field inside a slot.
+- Registration gates: `obj != 0`, `*(int*)(obj+0x164) != 0`, `FUN_004239b0(obj) != 0`,
+  `obj->flags132 & 0x10000` set, `obj->flags0 & 1` clear.
+- Slot fields written here: `+0xB2C` (the `param_3` argument), `+0xBCC`, `+0xBD0`.
+
+That makes 13 + 10 = 23 slot objects alive in the worst case, and explains why 13 slots fit
+before `g_slotPtrs`.
+
 ## Next steps
 
 1. **Define the struct in Ghidra** — `ObjSlot` (0xBE8) with a 5×0x1C8 effect array and the
