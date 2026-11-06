@@ -136,3 +136,36 @@ Two additions make the game drivable and observable in a windowless session:
 
 Together these reached the Doskias dialogue scene from a cold start with no display attached.
 That is the foundation for automated visual checks of art packs later.
+
+## Post-process upscaler: built, measured, redundant
+
+An EPX/Scale2x filter was implemented in the wrapper (`LegacyUpscaleEPX2`, `LEGACY_UPSCALE=2x`)
+and instrumented. Then the diagnostic line answered a question we had been guessing at:
+
+```
+legacy-upscale: diag surface=1280x960 bpp=2 | texture=1280x960 fmt=SDL_PIXELFORMAT_RGB565 factor=2
+```
+
+**The backbuffer is already 1280×960**, i.e. window resolution, not 640×480. The wrapper hands
+the engine a surface at display size, so whatever composite we receive is already at the target
+resolution. Doubling it again produced doubled/black scanlines — a correct filter applied to the
+wrong stage.
+
+Consequence: a post-process upscaler is not the missing piece. The filter is kept but
+dimension-guarded so it only runs when a genuine 2× relationship exists; today it is inert.
+
+## The question this exposes, and why it matters
+
+If the engine composes onto a 1280×960 surface, one of two things is true:
+
+- **It scales its art up** (from 640-wide source art) — a magnifying glass, same detail, larger.
+- **It draws art 1:1 on a larger canvas** — more of the world visible, and the "extended view"
+  the owner worried about already exists at any window size above 640×480.
+
+The two look similar in a screenshot but mean opposite things for art packs. The test is cheap:
+capture the same scene at 640×480 and at 1280×960, then compare how many pixels a character
+occupies. Twice as many pixels everywhere = scaling. Same sprite size, more visible surroundings
+= extended view.
+
+That single comparison decides what a hi-res pack can even deliver, so it comes before any more
+filter work.
