@@ -197,3 +197,42 @@ current build, without porting anything.
 Test: substitute one sprite record with a 2× version of itself, run at 1280×960, and compare.
 
 That single experiment decides whether the overhaul needs the port at all.
+
+## Pipeline settled (per-copy instrumentation)
+
+The single-shot diagnostic was misleading me; a periodic log (every 400th copy) is unambiguous, at
+a 1280×960 window:
+
+```
+copy#1    surface=1280x960 bpp=2 | texture=1280x960 factor=2
+copy#401  surface=1280x960 bpp=2 | texture=1280x960 factor=2
+```
+
+The presented backbuffer **is** the window size; the texture matches it; every frame is composed at
+1280×960. The `dst=640x480` lines in the earlier blit log were the engine's own offscreen canvases,
+not the presentation target. Two different surfaces, which is what made the two measurements look
+contradictory.
+
+Combined with the exactly-2.00× menu geometry, the model is: **the engine composes at output
+resolution and multiplies every drawing operation by a global factor** (window size ÷ 640×480).
+
+Consequence for the hypothesis in the previous section: supplying art at twice the resolution would
+most likely be drawn at twice the size again, not at higher detail — the scale factor comes from the
+output size, not from the asset. That makes "hi-res packs work today" unlikely, and it must not be
+claimed until a real replacement has been tried.
+
+## What actually blocks all art work
+
+Not resolution — **format**. The dumped records are a family of containers:
+
+| magic | count | looks like |
+|---|---|---|
+| `VSSF` | 155 | audio |
+| `AM04` | 40 | animation/sprite data, 47 KB–1.2 MB, header 0x48 with offset tables |
+| `TX00` | 12 | texture descriptor tables, ~600 B |
+| `CH14` | 12 | character records |
+| `GV00`, `IL00` | 1 each | globals, level index |
+
+Until the `AM04` sprite container is decoded — dimensions, palette, pixel layout — no pack can
+replace a single picture, at any resolution. That is the gate, and it comes before every other art
+task.
