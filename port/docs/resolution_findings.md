@@ -93,3 +93,46 @@ numbers do not. In-game counts need a desktop run.
 
 `LEGACY_BLIT_LOG=<path>` writes one line per present (`frame <n> blits=<n> locks=<n>`) plus up to
 300 individual blit records. Carried as `port/patches/0003-legacy-blit-log.patch`.
+
+## Correction: in-scene drawing does not go through `Blt`
+
+The menu measurement above only describes the **menu**. Driving the game into an actual scene
+(scripted click on New Game, then watching a dialogue in the Doskias chamber) gives a different
+picture:
+
+| state | blits/frame | locks/frame |
+|---|---|---|
+| main menu | up to 98 | 1–4 |
+| in-engine dialogue scene | **0** | **7** |
+
+Zero blits, seven locks, sustained over 6,000 frames. The scene — pre-rendered background,
+character sprites, portrait, text box — is painted by **writing pixels directly into a locked
+surface**. The wrapper is handed a memory buffer, not a list of sprite draws.
+
+So the earlier conclusion ("a wrapper-side scaled renderer is architecturally plausible") is
+**wrong for gameplay**. It holds only for menus and UI. Scaling individual sprites would require
+the engine's own drawing code, which is the part that has to be understood and replaced.
+
+## What that leaves as the realistic options
+
+1. **Post-process upscaling of the finished 640×480 frame** — cheap, wrapper-only, no new art.
+   It cannot add detail, but for pixel art a good upscaler visibly improves the result. This is
+   what most "HD" pixel-art re-releases actually do.
+2. **Port the engine's drawing path** — the only route to genuinely higher-resolution rendering
+   with sharper art. Larger than the 30–80 functions guessed earlier, because the software
+   renderer *is* the per-frame bulk of the game.
+
+Option 1 is worth having regardless; option 2 is the real project.
+
+## Harness (why none of this needs a human at the keyboard)
+
+Two additions make the game drivable and observable in a windowless session:
+
+- `LEGACY_SHOT_DIR` + `LEGACY_SHOT_EVERY` — save a BMP of the rendered frame every N presents
+  (`LegacyScreenshot`, `WinApi-ddraw.c`).
+- `LEGACY_INPUT="6000,click,100,440;9000,key,13"` — replay clicks and keys at millisecond offsets
+  (`LegacyInputPump` + `Patch_PushMouseClick`, `Game-Patch.c`). Coordinates are in the game's
+  640×480 logical space; SDL's logical-size handling converts real mouse input the same way.
+
+Together these reached the Doskias dialogue scene from a cold start with no display attached.
+That is the foundation for automated visual checks of art packs later.

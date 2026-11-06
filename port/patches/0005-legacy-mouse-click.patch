@@ -1,0 +1,53 @@
+diff --git a/games/Septerra Core/SR-Septerra/Game-Patch.c b/games/Septerra Core/SR-Septerra/Game-Patch.c
+index 1b35fba..bf05355 100644
+--- a/games/Septerra Core/SR-Septerra/Game-Patch.c	
++++ b/games/Septerra Core/SR-Septerra/Game-Patch.c	
+@@ -32,6 +32,36 @@ uint8_t Patch_IsPreselected[4];
+ uint32_t Patch_PreselectTime[3];
+ uint32_t Patch_IsBattle;
+ 
++void CCALL Patch_PushMouseClick(int x, int y)
++{
++    SDL_Event event;
++
++    memset(&event, 0, sizeof(event));
++    event.type = SDL_MOUSEMOTION;
++    event.motion.x = x;
++    event.motion.y = y;
++    event.motion.state = 0;
++    SDL_PushEvent(&event);
++
++    memset(&event, 0, sizeof(event));
++    event.type = SDL_MOUSEBUTTONDOWN;
++    event.button.button = SDL_BUTTON_LEFT;
++    event.button.state = SDL_PRESSED;
++    event.button.clicks = 1;
++    event.button.x = x;
++    event.button.y = y;
++    SDL_PushEvent(&event);
++
++    memset(&event, 0, sizeof(event));
++    event.type = SDL_MOUSEBUTTONUP;
++    event.button.button = SDL_BUTTON_LEFT;
++    event.button.state = SDL_RELEASED;
++    event.button.clicks = 1;
++    event.button.x = x;
++    event.button.y = y;
++    SDL_PushEvent(&event);
++}
++
+ void CCALL Patch_PushKeyEvent(uint32_t key)
+ {
+     SDL_Event event;
+diff --git a/games/Septerra Core/SR-Septerra/Game-Patch.h b/games/Septerra Core/SR-Septerra/Game-Patch.h
+index 01fd6ae..b83d7c6 100644
+--- a/games/Septerra Core/SR-Septerra/Game-Patch.h	
++++ b/games/Septerra Core/SR-Septerra/Game-Patch.h	
+@@ -33,6 +33,7 @@ extern "C" {
+ #endif
+ 
+ void CCALL Patch_PushKeyEvent(uint32_t key);
++void CCALL Patch_PushMouseClick(int x, int y);
+ 
+ #ifdef __cplusplus
+ }
