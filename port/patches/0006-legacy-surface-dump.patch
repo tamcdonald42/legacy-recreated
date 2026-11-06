@@ -1,0 +1,539 @@
+diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
+index d053947..6ff06eb 100644
+--- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
++++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
+@@ -26,6 +26,7 @@
+ #include <inttypes.h>
+ #endif
+ #include "WinApi-ddraw.h"
++#include "Game-Patch.h"
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -850,6 +851,8 @@ uint32_t CCALL IDirectDraw_SetCooperativeLevel_c(struct IDirectDraw_c *lpThis, v
+     return DD_OK;
+ }
+ 
++static int LegacyUpscaleFactor(void);
++
+ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32_t dwWidth, uint32_t dwHeight, uint32_t dwBPP)
+ {
+     Uint32 window_format, texture_format;
+@@ -909,7 +912,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+     }
+ #endif
+ 
+-    if (0 != SDL_RenderSetLogicalSize(lpThis->Renderer, dwWidth, dwHeight))
++    if (0 != SDL_RenderSetLogicalSize(lpThis->Renderer, dwWidth * LegacyUpscaleFactor(), dwHeight * LegacyUpscaleFactor()))
+     {
+         SDL_DestroyRenderer(lpThis->Renderer);
+         lpThis->Renderer = NULL;
+@@ -935,7 +938,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+ 
+     for (index = 0; index < 3; index++)
+     {
+-        lpThis->Texture[index] = SDL_CreateTexture(lpThis->Renderer, texture_format, SDL_TEXTUREACCESS_STREAMING, dwWidth, dwHeight);
++        lpThis->Texture[index] = SDL_CreateTexture(lpThis->Renderer, texture_format, SDL_TEXTUREACCESS_STREAMING, dwWidth * LegacyUpscaleFactor(), dwHeight * LegacyUpscaleFactor());
+     }
+ 
+     if ((lpThis->Texture[0] == NULL) || (lpThis->Texture[1] == NULL) || (lpThis->Texture[2] == NULL))
+@@ -1070,8 +1073,309 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+ //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
+ }
+ 
++/* ---- legacy blit instrumentation -----------------------------------------
++ * Answers one question: does the wrapper see the engine drawing each sprite?
++ * Set LEGACY_BLIT_LOG=<file path> and play. Every present writes one line:
++ *     frame <n> blits=<n> locks=<n>
++ * plus up to 300 individual blit lines carrying the rectangles.
++ * Many blits with small rectangles -> the wrapper sees per-sprite drawing.
++ * Few blits but many locks         -> the engine writes pixels itself.
++ * ------------------------------------------------------------------------- */
++static FILE *LegacyBlitLog = NULL;
++static int LegacyBlitLogState = 0;
++static unsigned long LegacyBlitCount = 0;
++static unsigned long LegacyLockCount = 0;
++static unsigned long LegacyFrameNo = 0;
++
++static FILE *LegacyBlitLogFile(void)
++{
++    if (LegacyBlitLogState == 0)
++    {
++        const char *Path = getenv("LEGACY_BLIT_LOG");
++
++        LegacyBlitLogState = -1;
++
++        if ((Path != NULL) && (Path[0] != '\0'))
++        {
++            LegacyBlitLog = fopen(Path, "w");
++
++            if (LegacyBlitLog != NULL)
++            {
++                LegacyBlitLogState = 1;
++                fprintf(LegacyBlitLog, "# frame blits locks\n");
++                fflush(LegacyBlitLog);
++            }
++        }
++    }
++
++    return LegacyBlitLog;
++}
++
++static int LegacySurfW(struct IDirectDrawSurface_c *S)
++{
++    return ((S != NULL) && (S->Surface != NULL)) ? S->Surface->w : -1;
++}
++
++static int LegacySurfH(struct IDirectDrawSurface_c *S)
++{
++    return ((S != NULL) && (S->Surface != NULL)) ? S->Surface->h : -1;
++}
++
++/* ---- legacy surface dump --------------------------------------------------
++ * LEGACY_DUMP_SURFACES=<dir> saves the first N distinct source surfaces that get
++ * blitted, as BMPs named surf_<w>x<h>_<n>.bmp. The engine's own copy of each
++ * sprite, in the format it actually samples.
++ * ------------------------------------------------------------------------- */
++static void LegacyDumpSurface(struct IDirectDrawSurface_c *Src)
++{
++    static char Dir[256];
++    static int State = 0;
++    static struct IDirectDrawSurface_c *Seen[512];
++    static int SeenCount = 0;
++    static int Saved = 0;
++    char Path[512];
++    int i;
++
++    if (State == 0)
++    {
++        const char *Env = getenv("LEGACY_DUMP_SURFACES");
++
++        State = -1;
++
++        if ((Env != NULL) && (Env[0] != '\0'))
++        {
++            snprintf(Dir, sizeof(Dir), "%s", Env);
++            State = 1;
++            eprintf("legacy-dump: dumping blitted surfaces to %s\n", Dir);
++        }
++    }
++
++    if ((State != 1) || (Src == NULL) || (Src->Surface == NULL)) return;
++    if (Saved >= 200) return;
++
++    for (i = 0; i < SeenCount; i++)
++    {
++        if (Seen[i] == Src) return;
++    }
++
++    if (SeenCount < 512) Seen[SeenCount++] = Src;
++
++    snprintf(Path, sizeof(Path), "%s/surf_%dx%d_%03d.bmp", Dir, Src->Surface->w, Src->Surface->h, Saved);
++
++    {
++        static int Logged = 0;
++
++        if (SDL_SaveBMP(Src->Surface, Path) == 0)
++        {
++            Saved++;
++            if (Logged < 5)
++            {
++                Logged++;
++                eprintf("legacy-dump: %dx%d bpp=%d -> %s\n", Src->Surface->w, Src->Surface->h,
++                        Src->Surface->format->BytesPerPixel, Path);
++            }
++        }
++    }
++}
++
++static void LegacyBlitMark(struct IDirectDrawSurface_c *Dst, struct _rect *DstRect,
++                           struct IDirectDrawSurface_c *Src, struct _rect *SrcRect)
++{
++    FILE *Log = LegacyBlitLogFile();
++
++    LegacyDumpSurface(Src);
++
++    LegacyBlitCount++;
++
++    if ((Log == NULL) || (LegacyBlitCount > 300))
++    {
++        return;
++    }
++
++    fprintf(Log, "blit dst=%dx%d dstrect=(%d,%d,%d,%d) src=%dx%d srcrect=(%d,%d,%d,%d)\n",
++            LegacySurfW(Dst), LegacySurfH(Dst),
++            DstRect ? DstRect->left : -1, DstRect ? DstRect->top : -1,
++            DstRect ? DstRect->right : -1, DstRect ? DstRect->bottom : -1,
++            LegacySurfW(Src), LegacySurfH(Src),
++            SrcRect ? SrcRect->left : -1, SrcRect ? SrcRect->top : -1,
++            SrcRect ? SrcRect->right : -1, SrcRect ? SrcRect->bottom : -1);
++}
++
++static void LegacyLockMark(void)
++{
++    LegacyLockCount++;
++}
++
++static void LegacyInputPump(void);
++
++static void LegacyFrameEnd(void)
++{
++    LegacyInputPump();
++    FILE *Log = LegacyBlitLogFile();
++
++    if (Log == NULL)
++    {
++        return;
++    }
++
++    LegacyFrameNo++;
++    fprintf(Log, "frame %lu blits=%lu locks=%lu\n", LegacyFrameNo, LegacyBlitCount, LegacyLockCount);
++    fflush(Log);
++
++    LegacyBlitCount = 0;
++    LegacyLockCount = 0;
++}
++/* ---- legacy scripted input ------------------------------------------------
++ * LEGACY_INPUT="6000,click,120,450;9000,key,13" replays actions at the given
++ * millisecond offsets so a windowless run can walk the menus.
++ * ------------------------------------------------------------------------- */
++static void LegacyInputPump(void)
++{
++    static int State = 0;
++    static unsigned long DueMs[32];
++    static char Kind[32][8];
++    static int ArgA[32];
++    static int ArgB[32];
++    static unsigned char Done[32];
++    static int Count = 0;
++    static Uint32 Start = 0;
++
++    if (State == 0)
++    {
++        const char *Env = getenv("LEGACY_INPUT");
++
++        State = -1;
++
++        if ((Env != NULL) && (Env[0] != '\0'))
++        {
++            char Buffer[1024];
++            char *Entry;
++
++            snprintf(Buffer, sizeof(Buffer), "%s", Env);
++            Entry = Buffer;
++
++            while ((Entry != NULL) && (*Entry != '\0') && (Count < 32))
++            {
++                char *Next = strchr(Entry, ';');
++                unsigned long Ms = 0;
++                char KindBuf[8] = "";
++                int A = 0;
++                int B = 0;
++
++                if (Next != NULL)
++                {
++                    *Next = '\0';
++                    Next++;
++                }
++
++                if (sscanf(Entry, "%lu,%7[^,],%d,%d", &Ms, KindBuf, &A, &B) >= 3)
++                {
++                    DueMs[Count] = Ms;
++                    snprintf(Kind[Count], sizeof(Kind[Count]), "%s", KindBuf);
++                    ArgA[Count] = A;
++                    ArgB[Count] = B;
++                    Done[Count] = 0;
++                    Count++;
++                }
++
++                Entry = Next;
++            }
++
++            if (Count > 0)
++            {
++                State = 1;
++                eprintf("legacy-input: %d actions scheduled\n", Count);
++            }
++        }
++    }
++
++    if (State != 1) return;
++    if (Start == 0) Start = SDL_GetTicks();
++
++    {
++        Uint32 Now = SDL_GetTicks() - Start;
++        int i;
++
++        for (i = 0; i < Count; i++)
++        {
++            if ((Done[i] == 0) && (Now >= (Uint32)DueMs[i]))
++            {
++                Done[i] = 1;
++
++                if (strcmp(Kind[i], "key") == 0)
++                {
++                    Patch_PushKeyEvent((uint32_t)ArgA[i]);
++                    eprintf("legacy-input: t=%lu key %d\n", (unsigned long)Now, ArgA[i]);
++                }
++                else if (strcmp(Kind[i], "click") == 0)
++                {
++                    Patch_PushMouseClick(ArgA[i], ArgB[i]);
++                    eprintf("legacy-input: t=%lu click %d,%d\n", (unsigned long)Now, ArgA[i], ArgB[i]);
++                }
++            }
++        }
++    }
++}
++
++
++/* ---- legacy frame capture -------------------------------------------------
++ * Gives a windowless run eyes: LEGACY_SHOT_DIR=<dir> saves a BMP every
++ * LEGACY_SHOT_EVERY presents (default 60). Used to verify rendering and art
++ * packs without a desktop session.
++ * ------------------------------------------------------------------------- */
++static void LegacyScreenshot(SDL_Renderer *Renderer)
++{
++    static char Dir[256];
++    static int State = 0;
++    static unsigned long Calls = 0;
++    static unsigned long Every = 60;
++    SDL_Surface *Shot;
++    int Width, Height;
++    char Path[512];
++
++    if (State == 0)
++    {
++        const char *EnvDir = getenv("LEGACY_SHOT_DIR");
++        const char *EnvEvery = getenv("LEGACY_SHOT_EVERY");
++
++        State = -1;
++
++        if ((EnvDir != NULL) && (EnvDir[0] != '\0'))
++        {
++            snprintf(Dir, sizeof(Dir), "%s", EnvDir);
++            if (EnvEvery != NULL)
++            {
++                unsigned long Value = (unsigned long)strtoul(EnvEvery, NULL, 10);
++                if (Value > 0) Every = Value;
++            }
++            State = 1;
++            eprintf("legacy-shot: enabled dir=%s every=%lu\n", Dir, Every);
++        }
++    }
++
++    if ((State != 1) || (Renderer == NULL)) return;
++
++    Calls++;
++    if ((Calls % Every) != 0) return;
++
++    if (SDL_GetRendererOutputSize(Renderer, &Width, &Height) != 0) return;
++
++    Shot = SDL_CreateRGBSurfaceWithFormat(0, Width, Height, 32, SDL_PIXELFORMAT_ARGB8888);
++    if (Shot == NULL) return;
++
++    if (SDL_RenderReadPixels(Renderer, NULL, SDL_PIXELFORMAT_ARGB8888, Shot->pixels, Shot->pitch) == 0)
++    {
++        snprintf(Path, sizeof(Path), "%s/shot_%05lu.bmp", Dir, Calls);
++        SDL_SaveBMP(Shot, Path);
++    }
++
++    SDL_FreeSurface(Shot);
++}
++
++
+ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, struct _rect *lpDestRect, struct IDirectDrawSurface_c * lpDDSrcSurface, struct _rect *lpSrcRect, uint32_t dwFlags, struct _ddbltfx * lpDDBltFX)
+ {
++    LegacyBlitMark(lpThis, lpDestRect, lpDDSrcSurface, lpSrcRect);
+     SDL_Rect dstrect, srcrect;
+     int fill_first;
+ 
+@@ -1130,6 +1434,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+ 
+             display_virtual_keyboard(lpThis->Renderer);
+             SDL_RenderPresent(lpThis->Renderer);
++    LegacyScreenshot(lpThis->Renderer);
+ 
+             // clear next frame
+             SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
+@@ -1316,6 +1621,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+             SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
+             display_virtual_keyboard(lpThis->Renderer);
+             SDL_RenderPresent(lpThis->Renderer);
++    LegacyScreenshot(lpThis->Renderer);
+ 
+             // clear next frame
+             SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
+@@ -1370,6 +1676,85 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
+ //    return IDirectDrawSurface_EnumOverlayZOrders(lpThis->lpObject, param1, param2, (LPDDENUMSURFACESCALLBACK)param3);
+ }
+ 
++/* ---- legacy post-process upscale (EPX / Scale2x) --------------------------
++ * The engine renders 640x480 no matter what. This takes that finished frame and
++ * doubles it with edge-aware interpolation instead of blocky nearest-neighbour.
++ * Wrapper only: no engine code involved.
++ *   LEGACY_UPSCALE=2x   enable
++ *   (unset / anything else) off, byte-for-byte original behaviour
++ * ------------------------------------------------------------------------- */
++static int LegacyUpscaleFactor(void)
++{
++    static int Factor = 0;
++
++    if (Factor == 0)
++    {
++        const char *Env = getenv("LEGACY_UPSCALE");
++
++        Factor = 1;
++
++        if ((Env != NULL) &&
++            ((strcmp(Env, "2x") == 0) || (strcmp(Env, "epx") == 0) || (strcmp(Env, "2") == 0)))
++        {
++            Factor = 2;
++            eprintf("legacy-upscale: EPX 2x enabled\n");
++        }
++    }
++
++    return Factor;
++}
++
++static uint32_t LegacyReadPixel(const uint8_t *p, int BytesPerPixel)
++{
++    if (BytesPerPixel == 1) return *p;
++    if (BytesPerPixel == 2) return *(const uint16_t *)p;
++    return *(const uint32_t *)p;
++}
++
++static void LegacyWritePixel(uint8_t *p, int BytesPerPixel, uint32_t Value)
++{
++    if (BytesPerPixel == 1) { *p = (uint8_t)Value; }
++    else if (BytesPerPixel == 2) { *(uint16_t *)p = (uint16_t)Value; }
++    else { *(uint32_t *)p = Value; }
++}
++
++static void LegacyUpscaleEPX2(const uint8_t *Src, int Width, int Height, int SrcPitch,
++                              uint8_t *Dst, int DstPitch, int BytesPerPixel)
++{
++    int x, y;
++
++    for (y = 0; y < Height; y++)
++    {
++        const uint8_t *Row = Src + (size_t)y * SrcPitch;
++        const uint8_t *UpRow = Src + (size_t)((y > 0) ? (y - 1) : y) * SrcPitch;
++        const uint8_t *DownRow = Src + (size_t)((y < Height - 1) ? (y + 1) : y) * SrcPitch;
++        uint8_t *OutTop = Dst + (size_t)(2 * y) * DstPitch;
++        uint8_t *OutBottom = OutTop + DstPitch;
++
++        for (x = 0; x < Width; x++)
++        {
++            int Left = (x > 0) ? (x - 1) : x;
++            int Right = (x < Width - 1) ? (x + 1) : x;
++            uint32_t P = LegacyReadPixel(Row + (size_t)x * BytesPerPixel, BytesPerPixel);
++            uint32_t A = LegacyReadPixel(UpRow + (size_t)x * BytesPerPixel, BytesPerPixel);
++            uint32_t D = LegacyReadPixel(DownRow + (size_t)x * BytesPerPixel, BytesPerPixel);
++            uint32_t C = LegacyReadPixel(Row + (size_t)Left * BytesPerPixel, BytesPerPixel);
++            uint32_t B = LegacyReadPixel(Row + (size_t)Right * BytesPerPixel, BytesPerPixel);
++            uint32_t E0 = P, E1 = P, E2 = P, E3 = P;
++
++            if ((C == A) && (C != D) && (A != B)) E0 = A;
++            if ((A == B) && (A != C) && (B != D)) E1 = B;
++            if ((D == C) && (D != B) && (C != A)) E2 = C;
++            if ((B == D) && (B != A) && (D != C)) E3 = D;
++
++            LegacyWritePixel(OutTop + (size_t)(2 * x) * BytesPerPixel, BytesPerPixel, E0);
++            LegacyWritePixel(OutTop + (size_t)(2 * x + 1) * BytesPerPixel, BytesPerPixel, E1);
++            LegacyWritePixel(OutBottom + (size_t)(2 * x) * BytesPerPixel, BytesPerPixel, E2);
++            LegacyWritePixel(OutBottom + (size_t)(2 * x + 1) * BytesPerPixel, BytesPerPixel, E3);
++        }
++    }
++}
++
+ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Texture)
+ {
+     uint8_t *dst, *src;
+@@ -1377,25 +1762,53 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+ 
+     if (0 == SDL_LockTexture(Texture, NULL, (void **)&dst, &dstpitch))
+     {
+-        if (0 == SDL_LockSurface(Surface))
++        Uint32 Fmt = 0;
++        int TW = 0, TH = 0;
++        int Factor = LegacyUpscaleFactor();
++
++        SDL_QueryTexture(Texture, &Fmt, NULL, &TW, &TH);
++
+         {
+-            src = (uint8_t *) Surface->pixels;
+-            srcpitch = Surface->pitch;
++            static int Calls = 0;
++
++            Calls++;
++
++            if ((Calls % 400) == 1)
++            {
++                eprintf("legacy-upscale: copy#%d surface=%dx%d bpp=%d | texture=%dx%d fmt=%s factor=%d\n",
++                        Calls, Surface->w, Surface->h, Surface->format->BytesPerPixel,
++                        TW, TH, SDL_GetPixelFormatName(Fmt), Factor);
++            }
++        }
+ 
+-            if (srcpitch == dstpitch)
++        if (0 == SDL_LockSurface(Surface))
++        {
++            if ((Factor > 1) && ((Surface->w * Factor) == TW) && ((Surface->h * Factor) == TH))
+             {
+-                memcpy(dst, src, Surface->h * srcpitch);
++                LegacyUpscaleEPX2((const uint8_t *)Surface->pixels, Surface->w, Surface->h,
++                                  Surface->pitch, dst, dstpitch,
++                                  Surface->format->BytesPerPixel);
+             }
+             else
+             {
+-                copylength = Surface->w * Surface->format->BytesPerPixel;
++                src = (uint8_t *) Surface->pixels;
++                srcpitch = Surface->pitch;
+ 
+-                for (height = Surface->h; height != 0; height--)
++                if (srcpitch == dstpitch)
+                 {
+-                    memcpy(dst, src, copylength);
++                    memcpy(dst, src, Surface->h * srcpitch);
++                }
++                else
++                {
++                    copylength = Surface->w * Surface->format->BytesPerPixel;
+ 
+-                    dst += dstpitch;
+-                    src += srcpitch;
++                    for (height = Surface->h; height != 0; height--)
++                    {
++                        memcpy(dst, src, copylength);
++
++                        dst += dstpitch;
++                        src += srcpitch;
++                    }
+                 }
+             }
+ 
+@@ -1408,6 +1821,7 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+ 
+ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
+ {
++    LegacyFrameEnd();
+ #ifdef DEBUG_DDRAW
+     eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
+ #endif
+@@ -1444,6 +1858,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
+         SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
+         display_virtual_keyboard(lpThis->Renderer);
+         SDL_RenderPresent(lpThis->Renderer);
++    LegacyScreenshot(lpThis->Renderer);
+ 
+         SDL_Delay(Display_DelayAfterFlip);
+ 
+@@ -1690,6 +2105,7 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+ 
+ uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
+ {
++    LegacyLockMark();
+ #ifdef DEBUG_DDRAW
+     eprintf("IDirectDrawSurface_Lock: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x, 0x%" PRIxPTR " - ", (uintptr_t) lpThis, (uintptr_t) lpDestRect, (uintptr_t) lpDDSurfaceDesc, dwFlags, (uintptr_t) hEvent);
+ #endif

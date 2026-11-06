@@ -236,3 +236,37 @@ Not resolution — **format**. The dumped records are a family of containers:
 Until the `AM04` sprite container is decoded — dimensions, palette, pixel layout — no pack can
 replace a single picture, at any resolution. That is the gate, and it comes before every other art
 task.
+
+## First artwork extracted (surface dump)
+
+Rather than reverse-engineer `AM04` blind, the wrapper now dumps the source surface of every
+distinct blit: `LEGACY_DUMP_SURFACES=<dir>` writes `surf_<w>x<h>_<n>.bmp`, capped at 200.
+
+First run (title screen + a click into the game) produced three:
+
+```
+640x480 bpp=2   617 KB   the complete title/splash artwork, with publisher logos
+36x637  bpp=2    67 KB   a narrow UI strip
+640x480 bpp=2   617 KB   a second full-screen layer
+```
+
+Findings:
+
+- Surface pixel format is **RGB565, 16 bpp** — not palettized, contrary to the assumption carried
+  from the 1999-era art discussion. Any replacement artwork must arrive in that format or be
+  converted to it.
+- Full-screen art is recoverable **as an image**, complete and uncut. This is the first time the
+  project has produced artwork rather than numbers, and it is exactly the kind of asset a pack
+  would override.
+- In-scene sprites are *not* captured by this route, because they are painted by direct pixel
+  writes rather than blitted (see the zero-blits measurement earlier).
+
+So there are two distinct asset paths, and they need different treatment:
+
+| asset kind | how it reaches the screen | pack approach |
+|---|---|---|
+| blitted layers (splash, UI strips, menu art) | `Blt` with a source surface | interceptable at blit time |
+| in-scene sprites | painted pixel by pixel by engine code | needs `AM04`/engine understanding |
+
+The `AM04` decode is still required for sprite work, but it is no longer the only route to
+replacing artwork.
