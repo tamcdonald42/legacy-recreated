@@ -200,3 +200,42 @@ must come from a different structure — most likely the per-object animation re
 
 **Consequence:** hunting image keys was the wrong thread for scene art. The palette banks are a
 real finding, but they are not what paints a scene.
+
+## Offline sprite render: working
+
+The five pointers passed to the blitter were one slot off in my earlier reading. `FUN_00409050`
+assembles them on the stack, so `&local_18` hands over six consecutive dwords:
+
+```
+param_1[0] = &image[0x18]   -> *param_1 = palette records (0x230 stride)
+param_1[1] = image[0x20]    -> section D: 0x18-byte entries
+param_1[2] = image[0x38]    -> section G: row table, 8 bytes per row
+param_1[3] = image[0x30]    -> section F: run descriptors, 8 bytes per run
+param_1[4] = image[0x28]    -> section E: pixel indices
+```
+
+**That is the whole mystery of the zeroed `+0x40`**: the pixel pool is section E, which is inside
+the file. The `+0x40` field is simply unused, and I had been reading the struct one field late.
+
+Section layouts, confirmed by inspection:
+
+```
+D entry  (0x18 bytes): +0x10 row index, +0x14 width
+G row    (8 bytes):    +0 count-run index, +4 runs in this row
+F run    (8 bytes):    +0 offset into E, +4 skip, +6 count
+```
+
+`port/tools/render_am04.py` implements this and renders entries from a real file. First runs on
+`01001f4b.bin`: 43x43 and 73x43 sprites appear, and they are **recognisable game art** — inventory
+item icons (equipment, a chest harness, a circular disc), each inside its selection frame. Rendered
+entirely outside the game, from the file on disk.
+
+Not perfect yet: entries 0–2 look like near-duplicate frames of the same item, which suggests the
+D-entry index is doing something more subtle than "one entry = one sprite" (probably animation
+frames of a single item, or a per-frame table). But the pixels, palettes, runs and row addresses are
+all correct — the image is the artwork, not noise.
+
+## What this means for art packs
+
+A pack can now be authored against a format we can read, write and verify offline: 256-colour
+palette plus run-described index data. The remaining work is packaging, not discovery.
