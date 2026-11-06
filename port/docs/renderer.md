@@ -75,3 +75,59 @@ runtime).
 1. Identify the pixel pointer field inside the 0x230 record (blitter side).
 2. Confirm whether the blit is 1:1 (no sampling) — settles the art-resolution ceiling for good.
 3. Then a pack can substitute pixels at the record level, which is the first real art pack.
+
+## Inside the blitter: the sprite format, and the resolution answer
+
+Reading `FUN_00404b20` end to end settles both open questions.
+
+### The pixel write
+
+```c
+*puVar6 = *(undefined2 *)(local_2c + 4 + (uint)*pbVar9 * 2);
+puVar6 = puVar6 + 1;
+pbVar9 = pbVar9 + 1;
+```
+
+Source is a **byte** (`*pbVar9`); destination is a **16-bit word**. The byte is used as an index
+into a table of 16-bit entries at `local_2c + 4`. In other words:
+
+- **Sprite art is 8-bit palettized**, one byte per pixel.
+- **Each frame carries its own palette**: 256 entries of 16-bit colour (RGB565), starting at
+  offset +4 of the frame's data structure.
+- The screen is 16-bit RGB565, which is why the *composited* surface we dumped looked direct-colour.
+  Both statements are true; they describe different ends of the same operation.
+
+*Correction to an earlier note:* `resolution_findings.md` recorded "art is RGB565, not palettized".
+That was measured on the presented surface, not on the source art. For sprite art the truth is
+**8-bit indexed with a per-frame palette**.
+
+### The copy is one-to-one
+
+The inner loop advances the source pointer by exactly one byte per pixel written, and the
+destination by exactly one word. There is no step, no factor, no second sample anywhere in the
+routine. Vertical walk adds a constant stride per row.
+
+**No scaling exists, in any form, anywhere in this engine.** Not in the wrapper, not in the
+placeholder routine, not in the blitter. The 2.00× window magnification really is all there is.
+
+### The pack hook
+
+The frame data pointer is:
+
+```c
+local_2c = *(ushort *)(record + 2) * 0x230 + *base;   /* the record */
+iVar4    = *(int *)(local_2c + 0x204);                 /* an override */
+if (iVar4) local_2c = iVar4;                           /* use it instead */
+```
+
+Field **+0x204** is a pointer the engine prefers when it is non-zero: substitute it and the blitter
+draws from whatever it points at, requiring only that the target begins with a 512-byte RGB565
+palette followed by index data reachable through the row descriptors. That is the cleanest possible
+insertion point — no patching of engine code, just a pointer.
+
+### Row structure
+
+Rows are described by pairs of 16-bit values walking a descriptor array: `(skip, count)`. The
+descriptor's other fields give the row's position in the pixel pool (`param_1[4] + offset`) and the
+run length. Clipping against the destination rectangle happens before the copy, per run, on both
+edges and both orientations (the code handles mirrored drawing with `iVar7 = ±1`).

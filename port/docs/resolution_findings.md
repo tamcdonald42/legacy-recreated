@@ -344,3 +344,8 @@ The remaining route is data flow rather than call matching: find the display-sur
 engine keeps, follow what it does with the pointer returned by Lock, and look for the stride
 arithmetic that writes pixels. That is a Ghidra session, not a wrapper one — and it is the honest
 next step, with no shortcut left to try first.
+
+**Correction (blitter read, later):** sprite *source* art is **8-bit palettized** with a per-frame
+256-entry RGB565 palette; the RGB565 finding refers to the composited screen surface. See
+`renderer.md`.
+
