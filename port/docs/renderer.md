@@ -1,0 +1,77 @@
+# The painter, located
+
+The chain that puts a scene on screen, with addresses in the original 1.04 binary. Every claim
+below is from decompiled code or runtime instrumentation, and each step was reached by following
+data rather than guessing at call sites.
+
+## The chain
+
+```
+FUN_0040b650   scene driver      walks g_levelObjs, tests each object's rect on screen
+   └─ FUN_00407d00   placement    works out the destination rect, clips it to 640 x height
+        └─ FUN_00404b20   blitter  reads the 0x230-byte frame record, writes the pixels
+```
+
+And underneath all of it, the screen itself:
+
+```
+FUN_00402850   lock screen    ->  DAT_004ae944 = pixel base
+                                  DAT_004ae94c = base + (pitch/2) * 0x300   (a line far down)
+FUN_004028e0   unlock screen
+```
+
+## How each piece was found
+
+**Screen globals.** The wrapper's `Lock` is handed the surface; scanning the engine's `.data` for a
+stored pointer to that surface produced exactly one hit, at `0x4A91A4` in the recompiled binary.
+The linker map names that slot `loc_4DE56C`, i.e. original address **0x4DE56C**. Fourteen functions
+read it; the writer is `FUN_00406090`.
+
+**Lock/unlock pair.** `FUN_00402850` does the work: it fetches the surface description, stores the
+pixel base in `DAT_004ae944`, and computes `DAT_004ae94c = (pitch/2)*0x300 + base`. `FUN_004028e0`
+calls the matching unlock and clears both. That is the classic lock → pointer + stride pattern, and
+it explains the lock counts measured at runtime.
+
+**Scene driver.** Of the 40 functions reading the pixel base, `FUN_0040b650` (353 lines) is the one
+that walks `g_levelObjs`, tests `PtInRect` for visibility, and issues draws per object.
+
+**Placement.** `FUN_00407d00` computes source and destination, clips with the literal `0x280` (640)
+and `DAT_004d4ea8` (screen height), then calls the blitter.
+
+**Blitter.** `FUN_00404b20`, 163 lines. It performs the frame-record lookup we predicted from
+`StartAnimation`:
+
+```c
+local_2c = *(ushort *)(param_3 + 2) * 0x230 + *(int *)*param_1;
+```
+
+Index × 0x230 plus a base — the same stride established from the animation side. It then walks
+scanlines with `ushort *` pointers (16-bit colour, matching the RGB565 surfaces measured at
+runtime).
+
+## Why this matters
+
+- **The 0x230 frame record is not just bookkeeping.** It is what the blitter reads to find pixels.
+  The record layout decoded earlier is therefore the pack key: replace what the record points at
+  and the blitter draws something else.
+- **The blitter is small.** 163 lines of decompiled C for the routine that paints every sprite.
+  The "30–80 functions" estimate for the render path now has a concrete centre: `FUN_00404b20`,
+  `FUN_00407d00`, `FUN_0040b650`, plus the lock/unlock pair.
+- **A wrapper-side or pack-side scaling step belongs here.** If art resolution is ever to matter,
+  this is the loop where source pixels become screen pixels — the only place where sampling
+  decisions are made.
+
+## Open questions
+
+- Where the pixels actually live inside the 0x230 record (the blitter reads a pointer from it; the
+  field has not been identified yet).
+- Whether the blitter does any scaling of its own, or only 1:1 copies. The clip maths suggests 1:1
+  with clipping, which would confirm art can never exceed native detail today.
+- What `0x300` in the stride computation represents — probably room below the visible frame for
+  off-screen rows.
+
+## Next steps, in order
+
+1. Identify the pixel pointer field inside the 0x230 record (blitter side).
+2. Confirm whether the blit is 1:1 (no sampling) — settles the art-resolution ceiling for good.
+3. Then a pack can substitute pixels at the record level, which is the first real art pack.
