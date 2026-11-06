@@ -117,3 +117,29 @@ so the modified file is genuinely the one being loaded.
 
 The disc is an inventory icon, and inventory is not reachable from the opening cutscene, so this has
 not been seen on screen. The file loads; the picture has not been watched.
+
+## Visibility test: twelve files, none on that screen
+
+Twelve AM04 files were repainted wholesale (every index of every entry rewritten to palette entries
+254/255, which were set to magenta and lime) and loaded one at a time through the pack layer. Each
+run confirmed the override fired:
+
+```
+01001f40 01001f41 01001f42 01001f43 01001f45 01001f46
+01001f47 01001f48 01001f49 01001f4a 01001f4c 08001f57   -> overrides=1, magenta pixels=0
+```
+
+Screenshots were taken every 150 frames across the opening cutscene and scanned for magenta; the
+baseline run confirmed zero false positives.
+
+**None of these twelve is drawn on that screen.** That is a clean negative result across the whole
+`0x01001f4x` family plus one `0x0800` file.
+
+So the cutscene's visible UI comes from somewhere else. Candidates, in order of likelihood:
+
+1. the `TX00` texture records (12 of them, ~600 bytes each) — texture descriptors rather than art;
+2. `CH14` character records;
+3. the 36x637 surface that gets blitted repeatedly, whose source has not been identified.
+
+The last one is the most tractable: we can dump that surface and search every blob for the matching
+pixel run, which identifies its key by content rather than by guessing.
