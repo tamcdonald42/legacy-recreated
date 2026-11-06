@@ -8,7 +8,8 @@ relocates eight offsets to pointers at load time:
   +0x04  uint32   type/flags
   +0x08  uint32   offset -> section A
   +0x10  uint32   offset -> section B
-  +0x18  uint32   offset -> frame record array   (0x230 bytes per frame)
+  +0x18  uint32   offset -> frame record array   (0x400 bytes per frame,
+                                   i.e. 256 colour entries of 4 bytes)
   +0x1C  uint32   number of frames
   +0x20  uint32   offset -> section D
   +0x28  uint32   offset -> section E (row descriptors)
@@ -18,16 +19,13 @@ relocates eight offsets to pointers at load time:
 
 Each frame record:
 
-  +0x000  uint32       unknown
-  +0x004  uint16[256]  RGB565 palette          (4 + 512 = 0x204)
-  +0x204  uint32       alternate record pointer (blitter prefers it when non-zero)
-  +0x208  uint16       mode 0/1/2
-  ...
-  +0x230  next record
+  +0x000  uint32[256]  palette, 0x00BBGGRR per entry  (1024 bytes = 0x400)
+  +0x400  next record
 
-The 0x204 boundary is the strongest confirmation available: the blitter reads the
-palette at record+4 with 256 entries, and the field it treats as an override
-begins at exactly 4 + 512.
+Verified against the live engine: the loaded copy matches the file byte for byte
+except eight relocated offsets, the frame array pointer (replaced at runtime with
+the engine's own converted copy) and the type dword (forced to 0xFFFFFFFF). Record
+span / frame count is exactly 0x400 on every file checked.
 
 Usage:
     python3 am04_info.py <file.bin> [--palette out.ppm]
@@ -36,15 +34,13 @@ Usage:
 import struct
 import sys
 
-RECORD = 0x230
-PALETTE_OFF = 0x04
+RECORD = 0x400   # 256 entries x 4 bytes (0x00BBGGRR)
+PALETTE_OFF = 0x00
 
 
-def rgb565(c):
-    r = (c >> 11) & 0x1F
-    g = (c >> 5) & 0x3F
-    b = c & 0x1F
-    return ((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2))
+def rgb(c):
+    """0x00BBGGRR -> (r, g, b)"""
+    return (c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF)
 
 
 def read_am04(data):
@@ -64,18 +60,16 @@ def read_am04(data):
         raise ValueError("frame array runs past end of file (%d frames at 0x%x, file 0x%x)"
                          % (n, rec_base, len(data)))
     head["palettes"] = []
-    head["modes"] = []
     for i in range(n):
         r = rec_base + i * RECORD
-        head["palettes"].append(struct.unpack_from("<256H", data, r + PALETTE_OFF))
-        head["modes"].append(struct.unpack_from("<H", data, r + 0x208)[0])
+        head["palettes"].append(struct.unpack_from("<256I", data, r))
     return head
 
 
 def write_palette_ppm(head, path):
     rows = []
     for pal in head["palettes"]:
-        line = b"".join(bytes(rgb565(c)) * 16 for c in pal)
+        line = b"".join(bytes(rgb(c)) * 16 for c in pal)
         rows.extend([line] * 16)
     w, h = 256 * 16, len(rows)
     with open(path, "wb") as f:
@@ -99,8 +93,9 @@ def main():
     for name, off in head["sections"].items():
         note = "  (empty)" if off == 0 else ("  (OUTSIDE FILE)" if off >= len(data) else "")
         print("   %-8s 0x%06x%s" % (name, off, note))
-    print("modes     : %s" % ", ".join(str(m) for m in head["modes"][:16]))
-    print("palette[0] first 8: %s" % " ".join("%04x" % c for c in head["palettes"][0][:8]))
+    distinct = len(set(head["palettes"][0]))
+    print("palette[0] : first 8 = %s, %d distinct" %
+          (" ".join("%06x" % (c & 0xFFFFFF) for c in head["palettes"][0][:8]), distinct))
     if "--palette" in sys.argv:
         out = sys.argv[sys.argv.index("--palette") + 1]
         print("wrote     : %s" % write_palette_ppm(head, out))

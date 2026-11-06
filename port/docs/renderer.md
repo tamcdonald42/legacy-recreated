@@ -99,3 +99,43 @@ not be trusted until the record base is settled.
 blobs before drawing, so dumping the live image struct shows what the fields actually point at,
 with no guessing. The wrapper can read that memory — it already reads engine globals to find the
 surface.
+
+## AM04: solved for palette banks
+
+The live-versus-file comparison settled it. Dumping the loaded structure for key `0x1001f41` and
+diffing against the file gives **39 differing bytes out of 8,192**, and every one of them is
+accounted for:
+
+| offset | file | live | why |
+|---|---|---|---|
+| +0x00 | `AM04` | `0x01001f41` | loader overwrites the magic with the key |
+| +0x04 | `0` | `0xFFFFFFFF` | loader tags images whose names begin I/S/E |
+| +0x08, +0x10, +0x20, +0x28, +0x30, +0x38, +0x40 | file offsets | `base + offset` | exactly the relocation seen in `FUN_0040f000` |
+| +0x18 | `0x548` | another allocation | engine swaps in its own converted copy |
+
+Everything else in those 8 KB is byte-identical, which proves the file is the image.
+
+### The record size
+
+`(next section - frame array) / frame count` = `(0x2148 - 0x548) / 7` = **0x400 exactly**, and the
+same division lands on 0x400 for the 16-frame file checked earlier. Not 0x230.
+
+0x400 = 1,024 bytes = **256 entries of 4 bytes**. Decoded as 32-bit colour, consecutive entries are
+smooth (0.80–0.99 by frame, 256 distinct values), and entry 0 is pure green. These are palettes.
+
+**So key `0x1001f41` is a palette bank, not a picture.** Seven palettes, probably lighting or
+time-of-day variants for one scene. That explains the earlier failure exactly: I was hunting for
+pixel records inside a file that contains no pixels.
+
+The engine converts each palette to 16-bit RGB565 at load — visible in the live dump, which holds
+16-bit pairs where the file holds 32-bit entries.
+
+### What is still unknown
+
+Where the *index* data lives. Sections at +0x08, +0x10, +0x20, +0x28, +0x30, +0x38 are still
+unnamed, and the pixel pool the blitter reads (`param_1[4]`) was zero in the files checked so far,
+which means the pixels for this key come from somewhere else entirely — most likely a different
+blob that shares the palette.
+
+`port/tools/am04_info.py` now reads this layout correctly: 0x400 records, 32-bit palettes, and it
+prints frame count, sections and a palette strip.
