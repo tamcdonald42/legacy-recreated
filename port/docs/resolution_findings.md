@@ -169,3 +169,31 @@ occupies. Twice as many pixels everywhere = scaling. Same sprite size, more visi
 
 That single comparison decides what a hi-res pack can even deliver, so it comes before any more
 filter work.
+
+## Settled: window size is pure magnification, exactly 2.00×
+
+Same static screen — the main menu — captured at 640×480 and at 1280×960, then the bright-pixel
+bounding box measured on both (no eyeballing):
+
+| capture | bbox | width | height | origin |
+|---|---|---|---|---|
+| 640×480 | (11,11)–(593,458) | 582 | 447 | 11,11 |
+| 1280×960 | (22,22)–(1187,916) | 1165 | 894 | 22,22 |
+
+Ratios: width **2.00**, height **2.00**, origin **2.00**. Every element sits at exactly twice the
+position and twice the size. Nothing is revealed at the edges.
+
+**Answer: there is no extended view.** Enlarging the window magnifies the same 640×480
+composition; it never shows more of the world. The owner's concern about a wider field of view
+constituting an unfair advantage does not apply — the capability does not exist.
+
+## The consequence worth testing next
+
+If the engine scales its drawing to fill the surface (which the 2.00× factor proves it does), then
+it must be *sampling* art scaled rather than pixel-doubling it — and art supplied at twice the
+resolution could survive at native detail. That would make high-resolution packs viable on the
+current build, without porting anything.
+
+Test: substitute one sprite record with a 2× version of itself, run at 1280×960, and compare.
+
+That single experiment decides whether the overhaul needs the port at all.
