@@ -184,3 +184,19 @@ Two candidate explanations, both testable:
 Either way the next move is the same and cheap: confirm visually that the game is in a scene, then
 dump the live image struct at that moment and look for a non-zero `+0x40`. Until that field is
 non-zero, no offline render is possible — the indices have no base to index from.
+
+## Gameplay confirmed, and what that rules out
+
+The scripted click does reach the game: a screenshot at frame 24,600 shows the opening cutscene —
+throne room, character portrait, dialogue box reading *"Doskias: It is not heresy. The artifacts are
+meant to unlock the secrets of the Core..."*.
+
+So the scene renderer is running with real artwork on screen, while the image structs visible in
+`.data` still report `+0x40 = 0` and still belong to the `0x01001f4x` family only.
+
+That means the scene does **not** draw from those image structs. The blitter's five-pointer input
+must come from a different structure — most likely the per-object animation records (0x1C8 `Obj`,
+0x230 frame records) rather than the image cache.
+
+**Consequence:** hunting image keys was the wrong thread for scene art. The palette banks are a
+real finding, but they are not what paints a scene.
