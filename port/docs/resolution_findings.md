@@ -270,3 +270,37 @@ So there are two distinct asset paths, and they need different treatment:
 
 The `AM04` decode is still required for sprite work, but it is no longer the only route to
 replacing artwork.
+
+## Art override tested: the shortcut does not exist
+
+`LEGACY_ART=<bmp>` was built to replace the contents of any blitted surface matching an image's
+size, as a proof that packs could work at the wrapper level. A deliberately altered 640×480 image
+(hue-rotated, flipped, magenta bars) was supplied. The log confirmed the swap:
+
+```
+legacy-art: loaded H:\ghidra\work\art_override.bmp (640x480)
+legacy-art: replaced surface 640x480
+```
+
+The screen did not change. Counting blits over the title screen explains why:
+
+| measurement | value |
+|---|---|
+| blits per frame at the title | 1 |
+| blits of the 36×637 UI strip (12 s total) | 10,537 |
+| blits of a 640×480 surface (12 s total) | **1** |
+| locks per frame | 3 |
+
+The single 640×480 blit happens once at startup; the strip is the only thing blitted repeatedly.
+The score, the logo, the menu — all of it is painted by **direct pixel writes** through three locks
+per frame.
+
+**Conclusion: there is no wrapper-level art replacement for anything visible.** Only narrow UI
+strips pass through `Blt`. Every substantial image reaches the screen through the engine's own
+software painter, which means:
+
+- the blob-level pack layer is still the correct insertion point;
+- making it work for real art requires reading the code that paints, i.e. `AM04` plus the painter
+  itself;
+- the "two asset paths" table earlier was too optimistic — it is one important path and a few
+  UI strips.
