@@ -1,13 +1,164 @@
+# The painter, located
 
+The chain that puts a scene on screen, with addresses in the original 1.04 binary. Every claim
+below is from decompiled code or runtime instrumentation, and each step was reached by following
+data rather than guessing at call sites.
+
+## The chain
+
+```
+FUN_0040b650   scene driver      walks g_levelObjs, tests each object's rect on screen
+   └─ FUN_00407d00   placement    works out the destination rect, clips it to 640 x height
+        └─ FUN_00404b20   blitter  reads the 0x230-byte frame record, writes the pixels
+```
+
+And underneath all of it, the screen itself:
+
+```
+FUN_00402850   lock screen    ->  DAT_004ae944 = pixel base
+                                  DAT_004ae94c = base + (pitch/2) * 0x300   (a line far down)
+FUN_004028e0   unlock screen
+```
+
+## How each piece was found
+
+**Screen globals.** The wrapper's `Lock` is handed the surface; scanning the engine's `.data` for a
+stored pointer to that surface produced exactly one hit, at `0x4A91A4` in the recompiled binary.
+The linker map names that slot `loc_4DE56C`, i.e. original address **0x4DE56C**. Fourteen functions
+read it; the writer is `FUN_00406090`.
+
+**Lock/unlock pair.** `FUN_00402850` does the work: it fetches the surface description, stores the
+pixel base in `DAT_004ae944`, and computes `DAT_004ae94c = (pitch/2)*0x300 + base`. `FUN_004028e0`
+calls the matching unlock and clears both. That is the classic lock → pointer + stride pattern, and
+it explains the lock counts measured at runtime.
+
+**Scene driver.** Of the 40 functions reading the pixel base, `FUN_0040b650` (353 lines) is the one
+that walks `g_levelObjs`, tests `PtInRect` for visibility, and issues draws per object.
+
+**Placement.** `FUN_00407d00` computes source and destination, clips with the literal `0x280` (640)
+and `DAT_004d4ea8` (screen height), then calls the blitter.
+
+**Blitter.** `FUN_00404b20`, 163 lines. It performs the frame-record lookup we predicted from
+`StartAnimation`:
+
+```c
+local_2c = *(ushort *)(param_3 + 2) * 0x230 + *(int *)*param_1;
+```
+
+Index × 0x230 plus a base — the same stride established from the animation side. It then walks
+scanlines with `ushort *` pointers (16-bit colour, matching the RGB565 surfaces measured at
+runtime).
+
+## Inside the blitter
+
+```c
+*dst = *(uint16 *)(record + 4 + *src * 2);
+```
+
+One byte in, one 16-bit word out: the byte is an index into a 256-entry table of 16-bit colours at
+`record + 4`. The copy advances source by one byte and destination by one word per pixel, with
+clipping only — **no step, no factor, no second sample anywhere in the routine**.
+
+That settles the resolution question: **no scaling exists in this engine in any form.** The 2.00x
+window magnification measured earlier is the whole of it.
+
+Rows are not flat bitmaps. Each row is a sequence of `(skip, count)` runs walked from a descriptor
+array, and the code handles mirrored drawing with `iVar7 = +/-1`.
+
+*Correction:* an earlier version of this note said "the art is RGB565, not palettized". That was
+measured on the composited screen surface. Source art is 8-bit indexed; the screen is RGB565. Both
+are true of different ends of the same operation.
+
+## The AM04 file format
+
+The loader `FUN_0040f000` opens a blob by key, reads it whole, checks the magic `AM04`
+(`0x34304d41`), then adds the blob base to **eight stored offsets**, turning them into pointers:
+
+```
++0x00  char[4]  'AM04'          (overwritten with the key at load)
++0x04  uint32   type            (forced to 0xFFFFFFFF for I/S/E names)
++0x08  uint32   -> section A
++0x10  uint32   -> section B
++0x18  uint32   -> palette array        (0x400 bytes per frame)
++0x1C  uint32   frame count
++0x20  uint32   -> section D
++0x28  uint32   -> section E   pixel indices
++0x30  uint32   -> section F   run descriptors
++0x38  uint32   -> section G   run jump table
++0x40  uint32   -> section H   (unused in the files checked)
+```
+
+Verified against the live engine: for key `0x1001f41` the loaded copy and the file differ in
+**39 bytes out of 8,192**, and every one is accounted for (magic → key, type → 0xFFFFFFFF, seven
+relocations, and `+0x18` replaced with the engine's converted array). Everything else is identical.
+
+### Record size
+
+`(next section - palette array) / frame count = 0x400` exactly, on a 7-frame and a 16-frame file.
+0x400 = 256 entries of 4 bytes, stored as `0x00BBGGRR`. Decoded as 32-bit colour the entries run
+smoothly (0.80–0.99 by frame) with 256 distinct values: these are palettes.
+
+**So keys like `0x1001f41` are palette banks, not pictures.** Seven palettes, probably lighting or
+time-of-day variants for one scene. An earlier attempt to find palettes "inside frame records" read
+noise because there are no pixel records in those files at all.
+
+### The runtime conversion
+
+The engine allocates its own array and rewrites `+0x18` to point at it. That array walks at
+**0x230 per frame** — the same stride the blitter uses — and each record is:
+
+```
+record+0x000  pointer to the file's 32-bit palette
+record+0x004  512-byte RGB565 palette (256 entries)   <- what the blitter reads
+record+0x204  header: mode, origin, duration, motion
+```
+
+The chain closes: 32-bit palettes in the file, converted to 16-bit at load, read at +4 by the
+blitter, with 0x230 as the stride everywhere.
+
+## Section map across three files
+
+| section | 01001f41 | 01001f4b | 01000fa2 | contents |
+|---|---|---|---|---|
+| A (+0x08) | 760 | 2,432 | 1,900 | small table |
+| B (+0x10) | 520 | 1,352 | 17,420 | table |
+| palettes (+0x18) | 7,168 | 12,288 | 16,384 | 7 / 12 / 16 palettes |
+| D (+0x20) | 480 | 1,248 | 4,944 | small table |
+| **E (+0x28)** | **110,065** | **636,131** | **766,636** | **8-bit pixel indices** |
+| F (+0x30) | 10,184 | 32,624 | 289,096 | run descriptors |
+| G (+0x38) | 6,672 | 24,712 | 107,568 | run jump table |
+| H (+0x40) | 0 | 0 | 0 | unused here |
+
+Section E spans 0–255 with 2.8–5.7 bits/byte entropy: 8-bit artwork.
+
+### Rendering attempt
+
+Feeding section E to a flat 640-wide bitmap **shears but shows real content** — a regular grid,
+digit strings, star-shaped icons, silhouettes. Not noise, and not the wrong section: rows are run
+described (`skip, count`), so a flat read misaligns them. Transcribing the blitter's run walk
+offline is the remaining step, and needs no new discovery.
+
+## Open questions
+
+- The exact run-walk semantics (descriptor indexing through sections F and G), needed for a clean
+  offline render.
+- What `0x300` in the stride computation represents — probably room below the visible frame.
+- Which keys are sprite sheets versus palette banks versus scene compositions.
+
+## Next steps, in order
+
+1. Transcribe the blitter's run walk into `port/tools/` and render section E cleanly.
+2. Use the result to identify which key holds which artwork.
+3. Then a pack can substitute pixels, which is the first real art pack.
 
 ## Instrumentation available
 
-Runtime switches now in the wrapper (all read from the environment, all inert unless set):
+Runtime switches in the wrapper (inert unless set):
 
 | variable | what it does |
 |---|---|
 | `LEGACY_PACK_DIR` / `_TRACE` / `_DUMP` | blob override and extraction |
-| `LEGACY_BLIT_LOG` | log every blit with source/destination rects |
+| `LEGACY_BLIT_LOG` | log every blit with source and destination rects |
 | `LEGACY_SHOT_DIR` / `_SHOT_EVERY` | screenshot every Nth presented frame |
 | `LEGACY_INPUT` | scripted clicks and keys, `t,action,x,y;...` |
 | `LEGACY_DUMP_SURFACES` | write every blitted surface to BMP |
@@ -20,11 +171,16 @@ Runtime switches now in the wrapper (all read from the environment, all inert un
 
 ## Where the offline render stands
 
-Not done. The run-walk itself is transcribed from the blitter, but one input is missing: the
-blitter reads pixel indices from `param_1[4]`, which comes from image field `+0x40`, and **that
-field is zero for every image loaded in the headless runs** — all twelve of them are the
-`0x01001f4x` palette-bank family.
+Not done, and the reason is specific rather than mysterious. The run-walk is transcribed from the
+blitter, but it needs `param_1[4]` — the pixel pool, taken from image field `+0x40` — and **that
+field is zero for every image loaded in the headless runs**: all twelve are the `0x01001f4x`
+palette-bank family.
 
-So either the pixel pool is built later in scene loading, or the runs never reached real gameplay.
-Both are testable and neither is a mystery: drive the game to a scene, dump the struct live at that
-moment, and look for a non-zero `+0x40`.
+Two candidate explanations, both testable:
+
+1. the pixel pool is built later, during scene loading, and the runs never got that far;
+2. the scripted click did not actually reach gameplay this time.
+
+Either way the next move is the same and cheap: confirm visually that the game is in a scene, then
+dump the live image struct at that moment and look for a non-zero `+0x40`. Until that field is
+non-zero, no offline render is possible — the indices have no base to index from.
