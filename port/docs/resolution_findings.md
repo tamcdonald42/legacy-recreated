@@ -62,3 +62,34 @@ composite path** — the code that decides where each sprite goes and paints it 
 in the range of 30–80 functions, plus the wrapper side. That is a months-scale project, not a
 years-scale one, and it is the piece worth attacking deliberately rather than the whole engine in
 alphabetical order.
+
+## Result (measured, headless menu run)
+
+Instrumented `IDirectDrawSurface_Blt` and `IDirectDrawSurface_Flip` with an env-var log
+(`LEGACY_BLIT_LOG`) and ran 12 seconds with no display. 10,127 presents, and the sprite work
+**goes through the wrapper**:
+
+```
+blit dst=640x480 dstrect=(0,0,36,28) src=36x637 srcrect=(0,0,36,28)
+blit dst=640x480 dstrect=(10,10,46,38) src=36x637 srcrect=(0,0,36,28)
+frame 2 blits=3 locks=4
+```
+
+- Destination surfaces are **640×480**, as predicted.
+- Blits carry **explicit source and destination rectangles** — the wrapper sees each sprite's
+  position and size individually.
+- Locks per frame are low (1–4), so composition is not done by painting pixels directly; the
+  engine asks the wrapper to move pictures around.
+
+**Consequence:** a wrapper-side higher-resolution renderer is architecturally plausible —
+the wrapper is handed each sprite draw with coordinates it can scale. It is not a small change
+(the destination is the engine's own 640×480 buffer, and anything drawn by other means has to be
+handled separately), but it does not require porting the game's drawing code first.
+
+**Caveat:** this is the menu, headless, at an unthrottled frame rate. Ratios matter, absolute
+numbers do not. In-game counts need a desktop run.
+
+## Instrumentation
+
+`LEGACY_BLIT_LOG=<path>` writes one line per present (`frame <n> blits=<n> locks=<n>`) plus up to
+300 individual blit records. Carried as `port/patches/0003-legacy-blit-log.patch`.

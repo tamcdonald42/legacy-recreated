@@ -1,0 +1,121 @@
+diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
+index d053947..93a85b0 100644
+--- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
++++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
+@@ -1070,8 +1070,100 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+ //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
+ }
+ 
++/* ---- legacy blit instrumentation -----------------------------------------
++ * Answers one question: does the wrapper see the engine drawing each sprite?
++ * Set LEGACY_BLIT_LOG=<file path> and play. Every present writes one line:
++ *     frame <n> blits=<n> locks=<n>
++ * plus up to 300 individual blit lines carrying the rectangles.
++ * Many blits with small rectangles -> the wrapper sees per-sprite drawing.
++ * Few blits but many locks         -> the engine writes pixels itself.
++ * ------------------------------------------------------------------------- */
++static FILE *LegacyBlitLog = NULL;
++static int LegacyBlitLogState = 0;
++static unsigned long LegacyBlitCount = 0;
++static unsigned long LegacyLockCount = 0;
++static unsigned long LegacyFrameNo = 0;
++
++static FILE *LegacyBlitLogFile(void)
++{
++    if (LegacyBlitLogState == 0)
++    {
++        const char *Path = getenv("LEGACY_BLIT_LOG");
++
++        LegacyBlitLogState = -1;
++
++        if ((Path != NULL) && (Path[0] != '\0'))
++        {
++            LegacyBlitLog = fopen(Path, "w");
++
++            if (LegacyBlitLog != NULL)
++            {
++                LegacyBlitLogState = 1;
++                fprintf(LegacyBlitLog, "# frame blits locks\n");
++                fflush(LegacyBlitLog);
++            }
++        }
++    }
++
++    return LegacyBlitLog;
++}
++
++static int LegacySurfW(struct IDirectDrawSurface_c *S)
++{
++    return ((S != NULL) && (S->Surface != NULL)) ? S->Surface->w : -1;
++}
++
++static int LegacySurfH(struct IDirectDrawSurface_c *S)
++{
++    return ((S != NULL) && (S->Surface != NULL)) ? S->Surface->h : -1;
++}
++
++static void LegacyBlitMark(struct IDirectDrawSurface_c *Dst, struct _rect *DstRect,
++                           struct IDirectDrawSurface_c *Src, struct _rect *SrcRect)
++{
++    FILE *Log = LegacyBlitLogFile();
++
++    LegacyBlitCount++;
++
++    if ((Log == NULL) || (LegacyBlitCount > 300))
++    {
++        return;
++    }
++
++    fprintf(Log, "blit dst=%dx%d dstrect=(%d,%d,%d,%d) src=%dx%d srcrect=(%d,%d,%d,%d)\n",
++            LegacySurfW(Dst), LegacySurfH(Dst),
++            DstRect ? DstRect->left : -1, DstRect ? DstRect->top : -1,
++            DstRect ? DstRect->right : -1, DstRect ? DstRect->bottom : -1,
++            LegacySurfW(Src), LegacySurfH(Src),
++            SrcRect ? SrcRect->left : -1, SrcRect ? SrcRect->top : -1,
++            SrcRect ? SrcRect->right : -1, SrcRect ? SrcRect->bottom : -1);
++}
++
++static void LegacyLockMark(void)
++{
++    LegacyLockCount++;
++}
++
++static void LegacyFrameEnd(void)
++{
++    FILE *Log = LegacyBlitLogFile();
++
++    if (Log == NULL)
++    {
++        return;
++    }
++
++    LegacyFrameNo++;
++    fprintf(Log, "frame %lu blits=%lu locks=%lu\n", LegacyFrameNo, LegacyBlitCount, LegacyLockCount);
++    fflush(Log);
++
++    LegacyBlitCount = 0;
++    LegacyLockCount = 0;
++}
++
+ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, struct _rect *lpDestRect, struct IDirectDrawSurface_c * lpDDSrcSurface, struct _rect *lpSrcRect, uint32_t dwFlags, struct _ddbltfx * lpDDBltFX)
+ {
++    LegacyBlitMark(lpThis, lpDestRect, lpDDSrcSurface, lpSrcRect);
+     SDL_Rect dstrect, srcrect;
+     int fill_first;
+ 
+@@ -1408,6 +1500,7 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+ 
+ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
+ {
++    LegacyFrameEnd();
+ #ifdef DEBUG_DDRAW
+     eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
+ #endif
+@@ -1690,6 +1783,7 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+ 
+ uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
+ {
++    LegacyLockMark();
+ #ifdef DEBUG_DDRAW
+     eprintf("IDirectDrawSurface_Lock: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x, 0x%" PRIxPTR " - ", (uintptr_t) lpThis, (uintptr_t) lpDestRect, (uintptr_t) lpDDSurfaceDesc, dwFlags, (uintptr_t) hEvent);
+ #endif
