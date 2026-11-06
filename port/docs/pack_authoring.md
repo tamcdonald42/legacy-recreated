@@ -86,3 +86,34 @@ valid; changing them is a separate problem.
   (`CH14`) records are documented elsewhere and are untouched by this work.
 - The engine converts palettes to RGB565 on load; a 24-bit-authored palette will lose precision at
   conversion, exactly as the original art did.
+
+## The writer exists: first pack built
+
+`port/tools/am04_replace.py` rewrites one entry's index bytes in place, leaving the file
+structurally identical — same sections, same offsets, same size, same run descriptors. That matters
+because the engine loads it exactly as it loaded the original, with nothing to re-validate.
+
+```
+python3 am04_replace.py FILE --entry 6 --pattern stripes --out NEW.bin
+```
+
+With `--pattern stripes` only non-background pixels of the entry are recoloured, so the object keeps
+its silhouette. `--pattern fill` replaces the whole cell, frame included.
+
+### What was produced
+
+Target: key `0x1001f4b`, entry 6 — the tilted disc icon, 37x37. 1,508 of 2,701 pixels rewritten in
+the palette's four most saturated colours. Before/after in `pack_before_after.png`.
+
+Verification: 2,699 bytes differ in a 710,859-byte file, all inside section E. The engine reports
+
+```
+legacy-pack: override key 0x1001f4b (710859 bytes) <- ...\pack\blobs\01001f4b.bin
+```
+
+so the modified file is genuinely the one being loaded.
+
+### Not yet proven
+
+The disc is an inventory icon, and inventory is not reachable from the opening cutscene, so this has
+not been seen on screen. The file loads; the picture has not been watched.
