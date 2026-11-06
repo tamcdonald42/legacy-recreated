@@ -9,6 +9,20 @@ on the **original** `septerra.exe`, which is the only thing worth decompiling.
 This repo contains **no game data and no decompiled game code**. You need your own copy of the
 game; nothing here redistributes it.
 
+## Why this exists
+
+I played Septerra Core as a demo, in the window after Valkyrie had lost their publisher and
+before they'd found another. The developers asked for feedback, so I wrote back saying a
+console-style JRPG on PC was exactly what I wanted and I'd buy it on release. They asked to
+quote my email in their pitch. I agreed — which means that in a very small way, I helped put
+this game in a box.
+
+That's the honest reason this repo exists. Not preservation in the abstract: I want to play the
+game I helped get made, at a resolution that isn't 1999.
+
+The timeline behind that — Viacom New Media closing, Valkyrie reforming, Monolith signing — is
+in [`port/docs/history.md`](port/docs/history.md), with sources.
+
 ## Approach
 
 The recompilation is not a source port — it is a translation of a translation. Two facts make
