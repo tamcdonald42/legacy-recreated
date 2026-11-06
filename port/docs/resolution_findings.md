@@ -304,3 +304,43 @@ software painter, which means:
   itself;
 - the "two asset paths" table earlier was too optimistic — it is one important path and a few
   UI strips.
+
+## Locating the painter: what worked, what didn't
+
+The goal was to find the engine function that writes those 3–7 locks' worth of pixels per frame.
+Two cheap approaches were tried and both failed honestly:
+
+**Vtable-offset byte scan.** `IDirectDrawSurface::Lock` sits at vtable offset 0x64, so the call
+should compile to `call [reg+0x64]`. A scan of the whole original `.text` for every such encoding
+(disp8 and disp32, every register) found **zero** occurrences. The engine does not reach DirectDraw
+that way.
+
+**Return-address trace.** Instrumenting the shim to log `_ReturnAddress()` produced three sites:
+
+```
+blt  from 0044AFA6
+lock from 0044B2E3
+flip from 0044B094
+```
+
+Resolved against a linker map (`/MAP` added to the build) these are the shim's own generated
+thunks (`IDirectDrawSurface_Lock_asm2c +0x23`), one level short of the engine. A stack walk was
+attempted to get one level further and returned garbage — these builds have no frame pointers.
+
+**Direct-call scan of the recompiled binary.** Searching for `E8` calls targeting each thunk found
+**zero direct callers**, which means the engine reaches them indirectly through stored function
+pointers.
+
+## What exists now that didn't before
+
+- `/MAP` in the build, giving `SR-Septerra.map`: 12,399 symbols with their addresses, including the
+  original names (`GetRecordName_ 0x410400`, `WinMain_ 0x412960`). That is a working bridge from a
+  runtime address to a named function.
+- `LEGACY_CALLERS=1` and `LEGACY_BT=1` instrumentation in the wrapper.
+
+## Where this leaves the painter hunt
+
+The remaining route is data flow rather than call matching: find the display-surface object the
+engine keeps, follow what it does with the pointer returned by Lock, and look for the stride
+arithmetic that writes pixels. That is a Ghidra session, not a wrapper one — and it is the honest
+next step, with no shortcut left to try first.
