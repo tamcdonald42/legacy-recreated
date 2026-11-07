@@ -239,3 +239,32 @@ all correct — the image is the artwork, not noise.
 
 A pack can now be authored against a format we can read, write and verify offline: 256-colour
 palette plus run-described index data. The remaining work is packaging, not discovery.
+
+## Blitter map: which image is drawn where
+
+`LEGACY_BLIT_HOOK=1` installs a detour at the sprite blitter and logs every distinct draw:
+
+```
+blit-key: key=08001F58 entry=10 frame=11 rect=233,198 414x376
+blit-key: key=01001F40 entry=0  frame=0  rect=0,0 28x28
+```
+
+How the key is recovered: `FUN_00409050` builds the blitter's five pointers on the stack from
+`&local_18`, so `p1[0]` is `&image[0x18]`. The image base is therefore `p1[0] - 0x18`, and the
+loader stamps the record key at the image's offset `0` (see the live-vs-file diff for `0x1001f41`,
+where `AM04` in the file becomes the key in memory). `entry` is `*(u16*)(param_3+4)` and `frame` is
+`*(u16*)(param_3+2)`.
+
+This turns "guess which file holds this art" into a lookup: play to the screen you care about, close
+the game, read `blit_keys.log`. The `Trace Blits.bat` launcher does exactly that.
+
+First map, from the title/menu sequence:
+
+| Key | Entries drawn | Notes |
+|---|---|---|
+| `01001F40` | 0-15, each once, stacked rects | startup sequence, 24-31 px wide |
+| `08001F58` | 0-12 cycling | scene/panel art, rects up to 594x237 |
+| `08001F57` | 20 | side panel at 21,418 (161x461) |
+
+Note how much of the "scene" is one key drawn repeatedly at different entries - which is exactly the
+per-frame behaviour that made file-level guessing fail.
