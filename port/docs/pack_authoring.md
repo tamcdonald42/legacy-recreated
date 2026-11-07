@@ -143,3 +143,25 @@ So the cutscene's visible UI comes from somewhere else. Candidates, in order of 
 
 The last one is the most tractable: we can dump that surface and search every blob for the matching
 pixel run, which identifies its key by content rather than by guessing.
+
+## Correction: the first pack did work, and we misread the evidence
+
+The very first in-game test - the 37x37 disc from `0x0101001f4b`, recoloured with diagonal stripes -
+**was visible on screen**. The screenshot showed regular parallel cyan/blue diagonal stripes across
+the disc, and that description was written down at the time as "bright light-blue/cyan diagonal
+stripes reflecting across its surface, giving it a glossy, metallic appearance" - then dismissed as
+the object's natural specular highlight.
+
+It was the replacement pattern. The palette indices chosen for the stripes happened to be the file's
+bluest entries, so the result looked like plausible sheen rather than an obvious debug colour.
+
+Two process failures to avoid repeating:
+
+1. **Do not use a colour that already occurs in the art.** A replacement pattern must be a colour
+   the original cannot produce (magenta/lime on a blue object), or the change is ambiguous.
+2. **A 7040x2160 capture makes a 37x37 icon ~30 pixels wide.** Vision passes over downscaled crops
+   described the pattern but could not judge its scale. Crop to the icon and upscale with
+   nearest-neighbour before deciding whether art changed.
+
+Consequence: everything after this point that assumed "the pack does not reach the screen" -
+the twelve-file sweep, the dark silhouettes investigation - was chasing a solved problem.
