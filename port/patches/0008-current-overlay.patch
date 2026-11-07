@@ -303,7 +303,7 @@ index a4d1c0e..c1d8faa 100644
      else:
          env.Append(CCFLAGS   = '-Dmain=SDL_main',
 diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
-index d053947..caf1ea4 100644
+index d053947..0e18619 100644
 --- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 +++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 @@ -26,6 +26,8 @@
@@ -342,7 +342,7 @@ index d053947..caf1ea4 100644
      }
  
      if ((lpThis->Texture[0] == NULL) || (lpThis->Texture[1] == NULL) || (lpThis->Texture[2] == NULL))
-@@ -1070,8 +1074,737 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+@@ -1070,8 +1074,832 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
  //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
  }
  
@@ -876,6 +876,101 @@ index d053947..caf1ea4 100644
 +    }
 +}
 +
++
++/* ===========================================================================
++ * Legacy blitter hook - intercept the game's sprite blitter.
++ *
++ * The blitter FUN_00404b20 (original VA, compiled to 0x00404870 in the
++ * recompiled binary) copies one source byte to one destination word: there is
++ * no scaling anywhere in the engine. To draw replacement art larger than its
++ * original pixel grid, we must own that function.
++ *
++ * Stage 1 (this code): install a detour, call through to the original via a
++ * trampoline, log the arguments. Output must be pixel-identical to a normal
++ * run; that is the proof the hook is transparent.
++ *
++ *   LEGACY_BLIT_HOOK=1  install and log
++ * ========================================================================= */
++
++/* The shim does not pull in <windows.h>; declare what the hook needs. */
++#define LEGACY_MEM_COMMIT              0x1000
++#define LEGACY_MEM_RESERVE             0x2000
++#define LEGACY_PAGE_EXECUTE_READWRITE  0x40
++
++extern void *__stdcall VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect);
++extern int __stdcall VirtualProtect(void *lpAddress, unsigned int dwSize, unsigned int flNewProtect, unsigned int *lpflOldProtect);
++extern int __stdcall FlushInstructionCache(void *hProcess, const void *lpBaseAddress, unsigned int dwSize);
++extern void *__stdcall GetCurrentProcess(void);
++
++typedef unsigned char (__cdecl *LegacyBlitFn)(unsigned int *p1, int p2, int p3, int *p4, unsigned short p5);
++
++static LegacyBlitFn LegacyOrigBlit = 0;
++static int LegacyBlitHooked = 0;
++
++static unsigned char __cdecl LegacyBlitHook(unsigned int *p1, int p2, int p3, int *p4, unsigned short p5)
++{
++    static int Calls = 0;
++
++    Calls++;
++
++    if ((Calls % 600) == 1)
++    {
++        eprintf("blit-hook: call#%d image=%08X rect=%d,%d %dx%d flags=%d\n",
++                Calls, (unsigned int)*p1,
++                p4[0], p4[1], p4[2], p4[3], (int)p5);
++    }
++
++    return LegacyOrigBlit(p1, p2, p3, p4, p5);
++}
++
++static void LegacyBlitHookInstall(void)
++{
++    unsigned char *Target = (unsigned char *)0x00404870;
++    unsigned char *Tramp;
++    unsigned int Old;
++    const char *Env;
++
++    if (LegacyBlitHooked) return;
++
++    Env = getenv("LEGACY_BLIT_HOOK");
++    if ((Env == NULL) || (Env[0] == '0') || (Env[0] == 0)) return;
++
++    if (!((Target[0] == 0x83) && (Target[1] == 0xEC) && (Target[2] == 0x3C)))
++    {
++        eprintf("blit-hook: prologue mismatch %02X %02X %02X\n", Target[0], Target[1], Target[2]);
++        return;
++    }
++
++    Tramp = (unsigned char *)VirtualAlloc(0, 64, LEGACY_MEM_COMMIT | LEGACY_MEM_RESERVE, LEGACY_PAGE_EXECUTE_READWRITE);
++
++    if (Tramp == 0)
++    {
++        eprintf("blit-hook: VirtualAlloc failed\n");
++        return;
++    }
++
++    memcpy(Tramp, Target, 10);                       /* sub esp,0x3c ; cmpl $0,0x486078 */
++    Tramp[10] = 0xE9;
++    *(int *)(Tramp + 11) = (int)(Target + 10) - (int)(Tramp + 15);
++
++    if (VirtualProtect(Target, 16, LEGACY_PAGE_EXECUTE_READWRITE, &Old))
++    {
++        Target[0] = 0xE9;
++        *(int *)(Target + 1) = (int)&LegacyBlitHook - (int)(Target + 5);
++
++        Target[5] = 0x90; Target[6] = 0x90; Target[7] = 0x90;
++        Target[8] = 0x90; Target[9] = 0x90;
++
++        VirtualProtect(Target, 16, Old, &Old);
++        FlushInstructionCache(GetCurrentProcess(), Target, 16);
++    }
++
++    LegacyOrigBlit = (LegacyBlitFn)Tramp;
++    LegacyBlitHooked = 1;
++
++    eprintf("blit-hook: installed at %08X, trampoline %08X\n", (unsigned int)Target, (unsigned int)Tramp);
++}
++
 +static void LegacyBlitMark(struct IDirectDrawSurface_c *Dst, struct _rect *DstRect,
 +                           struct IDirectDrawSurface_c *Src, struct _rect *SrcRect)
 +{
@@ -1080,7 +1175,7 @@ index d053947..caf1ea4 100644
      SDL_Rect dstrect, srcrect;
      int fill_first;
  
-@@ -1130,6 +1863,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1130,6 +1958,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
  
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1088,7 +1183,7 @@ index d053947..caf1ea4 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1316,6 +2050,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1316,6 +2145,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
              SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1096,7 +1191,7 @@ index d053947..caf1ea4 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1370,6 +2105,85 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
+@@ -1370,32 +2200,147 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
  //    return IDirectDrawSurface_EnumOverlayZOrders(lpThis->lpObject, param1, param2, (LPDDENUMSURFACESCALLBACK)param3);
  }
  
@@ -1182,7 +1277,9 @@ index d053947..caf1ea4 100644
  static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Texture)
  {
      uint8_t *dst, *src;
-@@ -1377,25 +2191,59 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
++
++    LegacyBlitHookInstall();
+     int dstpitch, srcpitch, copylength, height;
  
      if (0 == SDL_LockTexture(Texture, NULL, (void **)&dst, &dstpitch))
      {
@@ -1197,10 +1294,10 @@ index d053947..caf1ea4 100644
 -            src = (uint8_t *) Surface->pixels;
 -            srcpitch = Surface->pitch;
 +            static int Calls = 0;
-+
-+            Calls++;
  
 -            if (srcpitch == dstpitch)
++            Calls++;
++
 +            if ((Calls % 400) == 1)
              {
 -                memcpy(dst, src, Surface->h * srcpitch);
@@ -1252,7 +1349,7 @@ index d053947..caf1ea4 100644
                  }
              }
  
-@@ -1408,6 +2256,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+@@ -1408,6 +2353,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
  
  uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
  {
@@ -1261,7 +1358,7 @@ index d053947..caf1ea4 100644
  #ifdef DEBUG_DDRAW
      eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
  #endif
-@@ -1444,6 +2294,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
+@@ -1444,6 +2391,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
          SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
          display_virtual_keyboard(lpThis->Renderer);
          SDL_RenderPresent(lpThis->Renderer);
@@ -1269,7 +1366,7 @@ index d053947..caf1ea4 100644
  
          SDL_Delay(Display_DelayAfterFlip);
  
-@@ -1690,6 +2541,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+@@ -1690,6 +2638,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
  
  uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
  {
