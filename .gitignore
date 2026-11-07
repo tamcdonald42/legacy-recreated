@@ -32,3 +32,6 @@ pack/
 pack_test/
 caps/
 *.bmp.log
+pack_test_log.txt
+*.log
+readme_tmp*
