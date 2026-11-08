@@ -49,3 +49,25 @@ looks, because it is a filter, not resolution.
 Filtering can only smooth what is already there. Detail requires drawing art **larger than its
 original pixel grid**, which means the blitter has to scale an override image instead of copying
 1 byte to 1 word. That is a change in the renderer, not in a launcher.
+
+### Status: scaled replacement art works
+
+Verified on screen: the inventory disc slot (01001F4B entries 6 and 7) is drawn from a 2x
+replacement at 146x74 in a 73x37 cell, in both the idle and hovered states.
+
+Two findings that cost several failed rounds and are worth not repeating:
+
+1. **A sprite slot can be several entries, used as alternatives.** 01001F4B entry 7 draws while the
+   slot is idle, entry 6 while it is hovered. Replacing one leaves the other on screen, so the change
+   looks like it did nothing. Always check the draw counts per entry in a trace before concluding.
+
+2. **Colour-coded markers beat art for identification.** Replacing a 37-pixel icon with an upscaled
+   copy of itself is nearly invisible in a screenshot; a solid block of a known colour is not.
+   Marking several candidate entries in different colours in one run identifies all of them at once.
+
+Draw order: overlay at blit time is not enough - later draws in the same frame paint over it. The hook
+queues the request and paints during CopyBackbufferSurfaceToTexture, so the replacement is the last
+thing written each frame.
+
+Limit: the engine positions every element by its original size, so a doubled element spills out of
+its cell. That is a layout constraint, not a hook bug.

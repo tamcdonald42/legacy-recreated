@@ -303,7 +303,7 @@ index a4d1c0e..c1d8faa 100644
      else:
          env.Append(CCFLAGS   = '-Dmain=SDL_main',
 diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
-index d053947..af5ce66 100644
+index d053947..3d607cc 100644
 --- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 +++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 @@ -26,6 +26,8 @@
@@ -342,7 +342,7 @@ index d053947..af5ce66 100644
      }
  
      if ((lpThis->Texture[0] == NULL) || (lpThis->Texture[1] == NULL) || (lpThis->Texture[2] == NULL))
-@@ -1070,8 +1074,1081 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+@@ -1070,8 +1074,1105 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
  //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
  }
  
@@ -951,6 +951,10 @@ index d053947..af5ce66 100644
 +
 +    Dir = getenv("LEGACY_SCALE_DIR");
 +
++    eprintf("scale: load called, dir=%s hook=%s pack=%s\n", Dir ? Dir : "(null)",
++            getenv("LEGACY_BLIT_HOOK") ? getenv("LEGACY_BLIT_HOOK") : "(null)",
++            getenv("LEGACY_PACK_DIR") ? getenv("LEGACY_PACK_DIR") : "(null)");
++
 +    if (Dir == NULL) return;
 +
 +    if (strlen(Dir) > 400) return;
@@ -1095,7 +1099,16 @@ index d053947..af5ce66 100644
 +
 +static void LegacyScaleFlush(unsigned short *Base, int Stride, int DestW, int DestH)
 +{
++    static int Flushes = 0;
 +    int i;
++
++    Flushes++;
++
++    if ((Flushes % 120) == 1)
++    {
++        eprintf("scale-flush: #%d queued=%d surface=%dx%d stride=%d\n",
++                Flushes, LegacyScalePendingCount, DestW, DestH, Stride);
++    }
 +
 +    for (i = 0; i < LegacyScalePendingCount; i++)
 +    {
@@ -1157,6 +1170,17 @@ index d053947..af5ce66 100644
 +                {
 +                    int OriginX = (int)*(unsigned short *)((unsigned char *)p3 + 0x0C);
 +                    int OriginY = (int)*(short *)((unsigned char *)p3 + 0x06);
++
++                    eprintf("scale-match: key=%08X entry=%d destbase=%08X p3=%08X "
++                            "f06=%d f08=%d f0a=%d f0c=%d f0e=%d f10=%d origin=%d\n",
++                            Key2, Entry2, (unsigned int)p2, (unsigned int)p3,
++                            (int)*(short *)((unsigned char *)p3 + 0x06),
++                            (int)*(short *)((unsigned char *)p3 + 0x08),
++                            (int)*(unsigned short *)((unsigned char *)p3 + 0x0A),
++                            (int)*(unsigned short *)((unsigned char *)p3 + 0x0C),
++                            (int)*(unsigned short *)((unsigned char *)p3 + 0x0E),
++                            (int)*(unsigned short *)((unsigned char *)p3 + 0x10),
++                            OriginX * 640 + OriginY);
 +
 +                    LegacyScaleQueue(OriginX * 640 + OriginY, i);
 +                    break;
@@ -1424,7 +1448,7 @@ index d053947..af5ce66 100644
      SDL_Rect dstrect, srcrect;
      int fill_first;
  
-@@ -1130,6 +2207,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1130,6 +2231,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
  
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1432,7 +1456,7 @@ index d053947..af5ce66 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1316,6 +2394,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1316,6 +2418,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
              SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1440,7 +1464,7 @@ index d053947..af5ce66 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1370,32 +2449,154 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
+@@ -1370,32 +2473,154 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
  //    return IDirectDrawSurface_EnumOverlayZOrders(lpThis->lpObject, param1, param2, (LPDDENUMSURFACESCALLBACK)param3);
  }
  
@@ -1605,7 +1629,7 @@ index d053947..af5ce66 100644
                  }
              }
  
-@@ -1408,6 +2609,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+@@ -1408,6 +2633,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
  
  uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
  {
@@ -1614,7 +1638,7 @@ index d053947..af5ce66 100644
  #ifdef DEBUG_DDRAW
      eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
  #endif
-@@ -1444,6 +2647,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
+@@ -1444,6 +2671,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
          SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
          display_virtual_keyboard(lpThis->Renderer);
          SDL_RenderPresent(lpThis->Renderer);
@@ -1622,7 +1646,7 @@ index d053947..af5ce66 100644
  
          SDL_Delay(Display_DelayAfterFlip);
  
-@@ -1690,6 +2894,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+@@ -1690,6 +2918,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
  
  uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
  {
