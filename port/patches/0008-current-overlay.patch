@@ -303,7 +303,7 @@ index a4d1c0e..c1d8faa 100644
      else:
          env.Append(CCFLAGS   = '-Dmain=SDL_main',
 diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
-index d053947..13d86bc 100644
+index d053947..af5ce66 100644
 --- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 +++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 @@ -26,6 +26,8 @@
@@ -342,7 +342,7 @@ index d053947..13d86bc 100644
      }
  
      if ((lpThis->Texture[0] == NULL) || (lpThis->Texture[1] == NULL) || (lpThis->Texture[2] == NULL))
-@@ -1070,8 +1074,1049 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+@@ -1070,8 +1074,1081 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
  //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
  }
  
@@ -997,7 +997,7 @@ index d053947..13d86bc 100644
 +        H = Head[6] | (Head[7] << 8);
 +        Scale = Head[8] | (Head[9] << 8);
 +
-+        if ((W <= 0) || (H <= 0) || (Scale < 2) || (W > 1024) || (H > 1024))
++        if ((W <= 0) || (H <= 0) || (Scale < 1) || (W > 1024) || (H > 1024))
 +        {
 +            eprintf("scale: implausible geometry %dx%d x%d in %s\n", W, H, Scale, Full);
 +            fclose(Src);
@@ -1039,42 +1039,71 @@ index d053947..13d86bc 100644
 +    fclose(Manifest);
 +}
 +
-+static void LegacyScaleDraw(int DestBase, int Param, const LegacyScaleArt_t *Art)
++static void LegacyScaleDraw(unsigned short *Base, int Stride, int OriginIndex, const LegacyScaleArt_t *Art, int DestW, int DestH)
 +{
-+    const unsigned char *P3 = (const unsigned char *)Param;
-+    int Stride = 640;
-+    int OriginX = (int)*(unsigned short *)(P3 + 0x0C);
-+    int OriginY = (int)*(short *)(P3 + 0x06);
-+    unsigned short *Dst = (unsigned short *)(DestBase + ((OriginX * Stride) + OriginY) * 2);
-+    int x, y, dy, dx;
++    int x, y, dy, dx, s = Art->Scale;
 +
 +    for (y = 0; y < Art->H; y++)
 +    {
 +        for (x = 0; x < Art->W; x++)
 +        {
 +            unsigned short Colour = Art->Pix[y * Art->W + x];
-+            int Bx = x * Art->Scale;
-+            int By = y * Art->Scale;
 +
-+            if (Colour == 0) continue;   /* black is transparent in this art */
++            if (Colour == 0) continue;
 +
-+            for (dy = 0; dy < Art->Scale; dy++)
++            for (dy = 0; dy < s; dy++)
 +            {
-+                int RowBase = By + dy;
++                int Row = OriginIndex + (y * s + dy) * Stride;
 +
-+                if ((OriginX + RowBase) < 0 || (OriginX + RowBase) >= 480) continue;
++                if ((y * s + dy) + (OriginIndex / Stride) >= DestH) break;
 +
-+                for (dx = 0; dx < Art->Scale; dx++)
++                for (dx = 0; dx < s; dx++)
 +                {
-+                    int Col = Bx + dx;
++                    int Col = x * s + dx;
 +
-+                    if ((OriginY + Col) < 0 || (OriginY + Col) >= 640) continue;
++                    if (Col + (OriginIndex % Stride) >= DestW) break;
 +
-+                    Dst[RowBase * Stride + Col] = Colour;
++                    Base[Row + Col] = Colour;
 +                }
 +            }
 +        }
 +    }
++}
++
++/* Draws requested during the frame, painted at present time so nothing
++ * the game blits later can cover them. */
++
++typedef struct
++{
++    int OriginIndex;
++    int Art;
++} LegacyScalePending_t;
++
++#define LEGACY_SCALE_PENDING 16
++
++static LegacyScalePending_t LegacyScalePending[LEGACY_SCALE_PENDING];
++static int LegacyScalePendingCount = 0;
++
++static void LegacyScaleQueue(int OriginIndex, int Art)
++{
++    if (LegacyScalePendingCount >= LEGACY_SCALE_PENDING) return;
++
++    LegacyScalePending[LegacyScalePendingCount].OriginIndex = OriginIndex;
++    LegacyScalePending[LegacyScalePendingCount].Art = Art;
++    LegacyScalePendingCount++;
++}
++
++static void LegacyScaleFlush(unsigned short *Base, int Stride, int DestW, int DestH)
++{
++    int i;
++
++    for (i = 0; i < LegacyScalePendingCount; i++)
++    {
++        LegacyScaleDraw(Base, Stride, LegacyScalePending[i].OriginIndex,
++                        &LegacyScaleArt[LegacyScalePending[i].Art], DestW, DestH);
++    }
++
++    LegacyScalePendingCount = 0;
 +}
 +
 +static unsigned char __cdecl LegacyBlitHook(unsigned int *p1, int p2, int p3, int *p4, unsigned short p5)
@@ -1126,7 +1155,10 @@ index d053947..13d86bc 100644
 +            {
 +                if ((LegacyScaleArt[i].Key == Key2) && (LegacyScaleArt[i].Entry == Entry2))
 +                {
-+                    LegacyScaleDraw(p2, p3, &LegacyScaleArt[i]);
++                    int OriginX = (int)*(unsigned short *)((unsigned char *)p3 + 0x0C);
++                    int OriginY = (int)*(short *)((unsigned char *)p3 + 0x06);
++
++                    LegacyScaleQueue(OriginX * 640 + OriginY, i);
 +                    break;
 +                }
 +            }
@@ -1392,7 +1424,7 @@ index d053947..13d86bc 100644
      SDL_Rect dstrect, srcrect;
      int fill_first;
  
-@@ -1130,6 +2175,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1130,6 +2207,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
  
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1400,7 +1432,7 @@ index d053947..13d86bc 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1316,6 +2362,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1316,6 +2394,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
              SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1408,7 +1440,7 @@ index d053947..13d86bc 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1370,32 +2417,147 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
+@@ -1370,32 +2449,154 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
  //    return IDirectDrawSurface_EnumOverlayZOrders(lpThis->lpObject, param1, param2, (LPDDENUMSURFACESCALLBACK)param3);
  }
  
@@ -1496,6 +1528,13 @@ index d053947..13d86bc 100644
      uint8_t *dst, *src;
 +
 +    LegacyBlitHookInstall();
++
++    if (LegacyScalePendingCount > 0)
++    {
++        int Stride = Surface->pitch / 2;
++
++        LegacyScaleFlush((unsigned short *)Surface->pixels, Stride, Surface->w, Surface->h);
++    }
      int dstpitch, srcpitch, copylength, height;
  
      if (0 == SDL_LockTexture(Texture, NULL, (void **)&dst, &dstpitch))
@@ -1511,12 +1550,13 @@ index d053947..13d86bc 100644
 -            src = (uint8_t *) Surface->pixels;
 -            srcpitch = Surface->pitch;
 +            static int Calls = 0;
++
++            Calls++;
  
 -            if (srcpitch == dstpitch)
-+            Calls++;
-+
 +            if ((Calls % 400) == 1)
-+            {
+             {
+-                memcpy(dst, src, Surface->h * srcpitch);
 +                eprintf("legacy-upscale: copy#%d surface=%dx%d bpp=%d | texture=%dx%d fmt=%s factor=%d\n",
 +                        Calls, Surface->w, Surface->h, Surface->format->BytesPerPixel,
 +                        TW, TH, SDL_GetPixelFormatName(Fmt), Factor);
@@ -1532,8 +1572,7 @@ index d053947..13d86bc 100644
 +        if (0 == SDL_LockSurface(Surface))
 +        {
 +            if ((Factor > 1) && ((Surface->w * Factor) == TW) && ((Surface->h * Factor) == TH))
-             {
--                memcpy(dst, src, Surface->h * srcpitch);
++            {
 +                LegacyUpscaleEPX2((const uint8_t *)Surface->pixels, Surface->w, Surface->h,
 +                                  Surface->pitch, dst, dstpitch,
 +                                  Surface->format->BytesPerPixel);
@@ -1566,7 +1605,7 @@ index d053947..13d86bc 100644
                  }
              }
  
-@@ -1408,6 +2570,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+@@ -1408,6 +2609,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
  
  uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
  {
@@ -1575,7 +1614,7 @@ index d053947..13d86bc 100644
  #ifdef DEBUG_DDRAW
      eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
  #endif
-@@ -1444,6 +2608,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
+@@ -1444,6 +2647,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
          SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
          display_virtual_keyboard(lpThis->Renderer);
          SDL_RenderPresent(lpThis->Renderer);
@@ -1583,7 +1622,7 @@ index d053947..13d86bc 100644
  
          SDL_Delay(Display_DelayAfterFlip);
  
-@@ -1690,6 +2855,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+@@ -1690,6 +2894,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
  
  uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
  {
