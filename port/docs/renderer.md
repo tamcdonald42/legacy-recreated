@@ -293,3 +293,40 @@ per-frame behaviour that made file-level guessing fail.
 
 So the very first replacement did target the correct entry. The map confirms it independently of the
 screenshot argument, which is the point: from here, identification is a lookup, not a guess.
+
+## Scaled replacement art (the hi-res mechanism)
+
+The blitter copies 1 byte to 1 word, so sharper art is not a file-format problem - it is a drawing
+problem. The hook now stamps pre-scaled art over the original draw, at the same origin.
+
+Format (`*.scl`, little endian):
+
+```
+0x00  "SCL1"
+0x04  u16 width        (already scaled)
+0x06  u16 height       (already scaled)
+0x08  u16 scale factor (2)
+0x0A  width*height u16 RGB565 pixels
+```
+
+Manifest `pack/scale/scale.txt`, one line each: `KEY ENTRY FILE` (key hex, entry decimal).
+
+```
+01001F4B 6 01001F4B_6.scl
+```
+
+Engine side: `LegacyScaleLoad()` reads the manifest when the hook installs, `LegacyScaleDraw()`
+writes the scaled pixels at
+
+```
+dest = dest_base + (src_x * 640 + src_y) * 2
+```
+
+where `src_x`/`src_y` come from `param_3 + 0x0C` and `+ 0x06`. Stride 640 is the 640x480 backbuffer
+assumption; if art lands offset, that constant and the origin are the two things to adjust.
+
+Pixels equal to zero are treated as transparent, which is correct for this art but will be wrong for
+any sprite that legitimately uses palette index 0 as a colour.
+
+Verified so far: manifest loads (`scale: key 01001F4B entry 6 -> 146x74 x2`), game runs 10 s without
+crashing. Visual confirmation on the inventory screen is the outstanding step.
