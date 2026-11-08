@@ -71,3 +71,16 @@ thing written each frame.
 
 Limit: the engine positions every element by its original size, so a doubled element spills out of
 its cell. That is a layout constraint, not a hook bug.
+
+### Whole-frame 2x (LEGACY_WINDOW)
+
+`LEGACY_WINDOW=1280x960` makes the window 1280x960 while the engine keeps rendering 640x480.
+SDL_RenderCopy stretches the finished frame, so every element scales together and the layout stays
+intact. Nearest sampling by default (crisp pixels); `Scaling=linear` in the ini smooths it.
+
+This is the safe "it runs bigger" mode. It adds no detail - it is the same 640x480 image, larger.
+True added detail still needs either per-element replacement art with a layout-aware engine, or the
+native port.
+
+Do not use LEGACY_UPSCALE=2x for this: it builds the backbuffer at 1280x960 as well, so the engine
+draws 640x480 content into the top-left quarter and the EPX filter never matches. That path is dead.
