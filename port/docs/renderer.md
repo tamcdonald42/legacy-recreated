@@ -268,3 +268,28 @@ First map, from the title/menu sequence:
 
 Note how much of the "scene" is one key drawn repeatedly at different entries - which is exactly the
 per-frame behaviour that made file-level guessing fail.
+
+### First full map, from a real play session
+
+`Trace Blits.bat`, inventory opened, 56,371 logged draws, deduplicated by key:
+
+| Key | Draws | Role |
+|---|---|---|
+| `08001F58` | 14,950 | scene / panel art, cycles entries per frame |
+| `01001F4B` | 9,954 | inventory + HUD panels |
+| `08001F4D` | 7,964 | never examined before this map |
+| `01001F47` | 7,956 | UI |
+| `01001F43` | 6,723 | UI |
+| `01001F41` | 4,819 | palette-bank / UI |
+| `01001F45` | 2,159 | UI |
+| `08001F57` | 1,324 | side panel (161x461) |
+| `01001F4C` | 336 | small icons |
+| `01001F42` | 168 | UI |
+| `01001F40` | 18 | startup sequence |
+
+`01001F4B` by entry: `0`, `1`, `5`, `7`, `9`, `20` are drawn ~2,000 times each at large clip windows
+(panel furniture), while **entry `6` is drawn 94 times with clip bounds `16,342 -> 89,379`** - a
+37-pixel-tall strip in the HUD area. That is the disc icon.
+
+So the very first replacement did target the correct entry. The map confirms it independently of the
+screenshot argument, which is the point: from here, identification is a lookup, not a guess.
