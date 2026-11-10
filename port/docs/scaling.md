@@ -115,6 +115,31 @@ same `scale: key ... entry ...` lines and the frame log reports `EPX 640x480 -> 
 What this still cannot do is add detail. EPX sharpens the existing art; it does not invent pixels.
 Replacement art changes style at native resolution. Resolution itself is the native port's job.
 
+### Window fit and fullscreen (LEGACY_MODE / LEGACY_FIT)
+
+`LEGACY_MODE=window|desktop|fullscreen` chooses the display mode without editing `Septerra.cfg`.
+`desktop` is borderless fullscreen at the desktop resolution; `fullscreen` is exclusive mode.
+
+Placement is done by hand in `LegacyPresentTexture()`, not by `SDL_RenderSetLogicalSize`. SDL anchors
+its logical viewport to the left instead of centring it - measured at 1024x576 with a 1280x960
+texture: content occupied columns 0-767 with a 256-pixel bar on the right only. The helper clears to
+black and copies the frame into a computed destination rect instead.
+
+| `LEGACY_FIT` | result on a 16:9 screen |
+|---|---|
+| `box` (default) | 4:3 preserved, bars either side - 1440x1080 content on 1080p |
+| `stretch` | fills the screen, horizontal distortion |
+| `crop` | fills the screen, loses the top and bottom |
+
+Verified at 1024x576: `box` produced 128-pixel bars both sides with 768 pixels of content;
+`stretch` produced 1024 pixels of content and no bars.
+
+Launchers: `Play Fullscreen.bat` (box), `Play Fullscreen Stretch.bat` (stretch).
+
+Widescreen that shows *more of the scene* is not a fit mode - the game's backgrounds are 640x480
+paintings with nothing beyond the frame, so hor+ needs a wider canvas plus wider art. That is
+milestone-one territory, and even then the art has to exist.
+
 ### Verification pitfalls (cost hours, worth remembering)
 
 **Testing a window-size change over RDP is meaningless.** An RDP session reports its own desktop

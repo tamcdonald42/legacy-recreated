@@ -303,7 +303,7 @@ index a4d1c0e..c1d8faa 100644
      else:
          env.Append(CCFLAGS   = '-Dmain=SDL_main',
 diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
-index d053947..00280e0 100644
+index d053947..48f67d2 100644
 --- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 +++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 @@ -26,6 +26,8 @@
@@ -353,7 +353,7 @@ index d053947..00280e0 100644
  uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32_t dwWidth, uint32_t dwHeight, uint32_t dwBPP)
  {
      Uint32 window_format, texture_format;
-@@ -875,6 +894,30 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -875,6 +894,43 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
          return DDERR_UNSUPPORTEDMODE;
      }
  
@@ -381,10 +381,23 @@ index d053947..00280e0 100644
 +        Display_Height = ReqH;
 +    }
 +
++    /* LEGACY_MODE lets a launcher choose the display mode without rewriting
++       Septerra.cfg: window | desktop | fullscreen. */
++    {
++        const char *ModeEnv = getenv("LEGACY_MODE");
++
++        if (ModeEnv != NULL)
++        {
++            if (strcmp(ModeEnv, "desktop") == 0) { Display_Mode = 1; }
++            else if (strcmp(ModeEnv, "fullscreen") == 0) { Display_Mode = 2; }
++            else if (strcmp(ModeEnv, "window") == 0) { Display_Mode = 0; }
++        }
++    }
++
      lpThis->Window = SDL_CreateWindow("Septerra Core", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, (Display_Width != 0)?Display_Width:dwWidth, (Display_Height != 0)?Display_Height:dwHeight, ((Display_Resizable && (Display_Mode == 0))?SDL_WINDOW_RESIZABLE:0) | ((Display_Mode == 1)?SDL_WINDOW_FULLSCREEN_DESKTOP:0) | ((Display_Mode == 2)?SDL_WINDOW_FULLSCREEN:0) | SDL_WINDOW_HIDDEN);
      if (lpThis->Window == NULL)
      {
-@@ -884,6 +927,14 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -884,6 +940,14 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
          return DDERR_UNSUPPORTEDMODE;
      }
  
@@ -399,16 +412,19 @@ index d053947..00280e0 100644
      lpThis->Renderer = SDL_CreateRenderer(lpThis->Window, -1, (Display_VSync)?SDL_RENDERER_PRESENTVSYNC:0);
      if (lpThis->Renderer == NULL)
      {
-@@ -909,7 +960,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -909,7 +973,10 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
      }
  #endif
  
 -    if (0 != SDL_RenderSetLogicalSize(lpThis->Renderer, dwWidth, dwHeight))
-+    if (0 != SDL_RenderSetLogicalSize(lpThis->Renderer, dwWidth * LegacyUpscaleFactor(), dwHeight * LegacyUpscaleFactor()))
++    /* Presentation is placed explicitly in LegacyPresentTexture() instead of using
++       SDL_RenderSetLogicalSize: SDL anchors the logical viewport left rather than
++       centring it, which pillarboxes the image to one side. */
++    if (0 != SDL_RenderSetLogicalSize(lpThis->Renderer, 0, 0))
      {
          SDL_DestroyRenderer(lpThis->Renderer);
          lpThis->Renderer = NULL;
-@@ -935,7 +986,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -935,7 +1002,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
  
      for (index = 0; index < 3; index++)
      {
@@ -417,10 +433,18 @@ index d053947..00280e0 100644
      }
  
      if ((lpThis->Texture[0] == NULL) || (lpThis->Texture[1] == NULL) || (lpThis->Texture[2] == NULL))
-@@ -1070,8 +1121,1105 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+@@ -1070,172 +1137,1270 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
  //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
  }
  
+-uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, struct _rect *lpDestRect, struct IDirectDrawSurface_c * lpDDSrcSurface, struct _rect *lpSrcRect, uint32_t dwFlags, struct _ddbltfx * lpDDBltFX)
+-{
+-    SDL_Rect dstrect, srcrect;
+-    int fill_first;
+-
+-#ifdef DEBUG_DDRAW
+-    eprintf("IDirectDrawSurface_Blt: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x, 0x%" PRIxPTR " - ", (uintptr_t)lpThis, (uintptr_t)lpDestRect, (uintptr_t)lpDDSrcSurface, (uintptr_t)lpSrcRect, dwFlags, (uintptr_t)lpDDBltFX);
+-#endif
 +/* ---- legacy blit instrumentation -----------------------------------------
 + * Answers one question: does the wrapper see the engine drawing each sprite?
 + * Set LEGACY_BLIT_LOG=<file path> and play. Every present writes one line:
@@ -434,17 +458,35 @@ index d053947..00280e0 100644
 +static unsigned long LegacyBlitCount = 0;
 +static unsigned long LegacyLockCount = 0;
 +static unsigned long LegacyFrameNo = 0;
-+
+ 
+-    if (lpThis == NULL)
 +static FILE *LegacyBlitLogFile(void)
 +{
 +    if (LegacyBlitLogState == 0)
-+    {
+     {
+-#ifdef DEBUG_DDRAW
+-        eprintf("error\n");
+-#endif
+-        return DDERR_INVALIDPARAMS;
+-    }
 +        const char *Path = getenv("LEGACY_BLIT_LOG");
-+
+ 
+-    if (((dwFlags == (DDBLT_ASYNC | DDBLT_COLORFILL)) && (lpDDBltFX != NULL)) ||
+-        ((dwFlags == (DDBLT_WAIT | DDBLT_COLORFILL)) && (lpDDBltFX != NULL))
+-       )
+-    {
+-#ifdef DEBUG_DDRAW
+-        eprintf("fill %s: 0x%x - ", ((lpThis->primary)?"frontbuffer":((lpThis->backbuffer)?"backbuffer":"surface")), lpDDBltFX->dwFillColor);
 +        LegacyBlitLogState = -1;
-+
+ 
+-        if (lpDestRect != NULL)
+-        {
+-            eprintf("[%i x %i - %i x %i] - ", lpDestRect->left, lpDestRect->top, lpDestRect->right, lpDestRect->bottom);
+-        }
+-        else
 +        if ((Path != NULL) && (Path[0] != '\0'))
-+        {
+         {
+-            eprintf("[whole surface] - ");
 +            LegacyBlitLog = fopen(Path, "w");
 +
 +            if (LegacyBlitLog != NULL)
@@ -453,9 +495,11 @@ index d053947..00280e0 100644
 +                fprintf(LegacyBlitLog, "# frame blits locks\n");
 +                fflush(LegacyBlitLog);
 +            }
-+        }
+         }
+-#endif
 +    }
-+
+ 
+-        if (lpDestRect != NULL)
 +    return LegacyBlitLog;
 +}
 +
@@ -509,25 +553,35 @@ index d053947..00280e0 100644
 +    for (Slot = (unsigned long *)0x46C000UL; Slot < (unsigned long *)0x4AAFB8UL; Slot++)
 +    {
 +        if (*Slot == Target)
-+        {
+         {
+-            dstrect.x = lpDestRect->left;
+-            dstrect.y = lpDestRect->top;
+-            dstrect.w = lpDestRect->right - lpDestRect->left;
+-            dstrect.h = lpDestRect->bottom - lpDestRect->top;
 +            eprintf("legacy-global: surface %p stored at %p\n", Surface, (void *)Slot);
 +
 +            if (++Hits >= 40) break;
-+        }
+         }
 +    }
-+
+ 
+-        if (lpThis->primary)
+-        {
+-            Uint8 r, g, b;
 +    if (Hits == 0) eprintf("legacy-global: surface %p not found in .data\n", Surface);
 +}
-+
+ 
+-            SDL_GetRGB(lpDDBltFX->dwFillColor, lpThis->lpBackbuffer->Surface->format, &r, &g, &b);
 +static void LegacyBacktrace(const char *What)
 +{
 +    static int Calls = 0;
 +    unsigned long *Frame = 0;
 +    int i;
-+
+ 
+-            SDL_SetRenderDrawColor(lpThis->Renderer, r, g, b, 255);
 +    if (getenv("LEGACY_BT") == NULL) return;
 +    if (Calls >= 2) return;
-+
+ 
+-            if (0 != SDL_RenderFillRect(lpThis->Renderer, (lpDestRect != NULL)?&dstrect:NULL))
 +    Calls++;
 +
 +    __asm { mov Frame, ebp }
@@ -576,40 +630,55 @@ index d053947..00280e0 100644
 +            Art = SDL_LoadBMP(Path);
 +
 +            if (Art != NULL)
-+            {
+             {
+-#ifdef DEBUG_DDRAW
+-                eprintf("error\n");
+-#endif
+-                return DDERR_SURFACEBUSY;
 +                State = 1;
 +                eprintf("legacy-art: loaded %s (%dx%d)\n", Path, Art->w, Art->h);
 +            }
 +            else
 +            {
 +                eprintf("legacy-art: cannot load %s: %s\n", Path, SDL_GetError());
-+            }
+             }
 +        }
 +    }
-+
+ 
+-            display_virtual_keyboard(lpThis->Renderer);
+-            SDL_RenderPresent(lpThis->Renderer);
 +    if ((State != 1) || (Src == NULL) || (Src->Surface == NULL)) return;
 +    if ((Src->Surface->w != Art->w) || (Src->Surface->h != Art->h)) return;
-+
+ 
+-            // clear next frame
+-            SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
+-            SDL_RenderClear(lpThis->Renderer);
 +    for (i = 0; i < DoneCount; i++)
 +    {
 +        if (Done[i] == Src) return;
 +    }
-+
+ 
+-            lpThis->was_flipped = 0;
 +    {
 +        SDL_Surface *Converted = SDL_ConvertSurface(Art, Src->Surface->format, 0);
-+
+ 
+-#ifdef DEBUG_DDRAW
+-            eprintf("OK\n");
+-#endif
 +        if (Converted != NULL)
 +        {
 +            SDL_BlitSurface(Converted, NULL, Src->Surface, NULL);
 +            SDL_FreeSurface(Converted);
-+
+ 
+-            return DD_OK;
 +            if (DoneCount < 64) Done[DoneCount++] = Src;
 +
 +            eprintf("legacy-art: replaced surface %dx%d\n", Src->Surface->w, Src->Surface->h);
-+        }
+         }
 +    }
 +}
-+
+ 
+-        if (0 != SDL_FillRect(lpThis->Surface, (lpDestRect != NULL)?&dstrect:NULL, lpDDBltFX->dwFillColor))
 +static void LegacyDumpSurface(struct IDirectDrawSurface_c *Src)
 +{
 +    static char Dir[256];
@@ -627,30 +696,47 @@ index d053947..00280e0 100644
 +        State = -1;
 +
 +        if ((Env != NULL) && (Env[0] != '\0'))
-+        {
+         {
+-#ifdef DEBUG_DDRAW
+-            eprintf("error\n");
+-#endif
+-            return DDERR_SURFACEBUSY;
 +            snprintf(Dir, sizeof(Dir), "%s", Env);
 +            State = 1;
 +            eprintf("legacy-dump: dumping blitted surfaces to %s\n", Dir);
-+        }
+         }
 +    }
-+
+ 
+-#ifdef DEBUG_DDRAW
+-        eprintf("OK\n");
+-#endif
 +    if ((State != 1) || (Src == NULL) || (Src->Surface == NULL)) return;
 +    if (Saved >= 200) return;
-+
+ 
+-        return DD_OK;
 +    for (i = 0; i < SeenCount; i++)
 +    {
 +        if (Seen[i] == Src) return;
-+    }
-+
+     }
+ 
+-    if (((dwFlags == 0) && (lpDDBltFX == NULL)) ||
+-        ((dwFlags == (DDBLT_ROP | DDBLT_WAIT)) && (lpDDBltFX != NULL) && (lpDDBltFX->dwROP == SRCCOPY)) ||
+-        ((dwFlags == (DDBLT_KEYSRCOVERRIDE | DDBLT_WAIT)) && (lpDDBltFX != NULL))
+-       )
 +    if (SeenCount < 512) Seen[SeenCount++] = Src;
 +
 +    snprintf(Path, sizeof(Path), "%s/surf_%dx%d_%03d.bmp", Dir, Src->Surface->w, Src->Surface->h, Saved);
 +
-+    {
+     {
+-        if (lpDDSrcSurface == NULL)
 +        static int Logged = 0;
 +
 +        if (SDL_SaveBMP(Src->Surface, Path) == 0)
-+        {
+         {
+-#ifdef DEBUG_DDRAW
+-            eprintf("error\n");
+-#endif
+-            return DDERR_INVALIDPARAMS;
 +            Saved++;
 +            if (Logged < 5)
 +            {
@@ -658,10 +744,12 @@ index d053947..00280e0 100644
 +                eprintf("legacy-dump: %dx%d bpp=%d -> %s\n", Src->Surface->w, Src->Surface->h,
 +                        Src->Surface->format->BytesPerPixel, Path);
 +            }
-+        }
+         }
 +    }
 +}
-+
+ 
+-#ifdef DEBUG_DDRAW
+-        eprintf("copy %s to %s - ", ((lpDDSrcSurface->primary)?"frontbuffer":((lpDDSrcSurface->backbuffer)?"backbuffer":"surface")), ((lpThis->primary)?"frontbuffer":((lpThis->backbuffer)?"backbuffer":"surface")));
 +/* ---- legacy image struct dump --------------------------------------------
 + * LEGACY_IMAGE_DIR=<dir> dumps the image structure the engine built from an
 + * AM04 blob: the eight relocated section pointers, plus raw copies of the
@@ -692,7 +780,8 @@ index d053947..00280e0 100644
 +        0x485F74UL, 0x485F78UL, 0x485F7CUL, 0x485F80UL, 0x485F84UL
 +    };
 +    int i;
-+
+ 
+-        if (lpSrcRect != NULL)
 +    if (Done || (getenv("LEGACY_SLOTS") == NULL)) return;
 +    if (SDL_GetTicks() < 25000) return;
 +
@@ -708,20 +797,24 @@ index d053947..00280e0 100644
 +        __except (1) { continue; }
 +
 +        if (Ptr == 0)
-+        {
+         {
+-            eprintf("[%i x %i - %i x %i] - ", lpSrcRect->left, lpSrcRect->top, lpSrcRect->right, lpSrcRect->bottom);
 +            eprintf("legacy-slot: %d @%08x empty\n", i, (unsigned)Slots[i]);
 +            continue;
-+        }
+         }
+-        else
 +
 +        __try { Key = *(unsigned long *)Ptr; }
 +        __except (1) { continue; }
 +
 +        for (k = 0; k < 8; k++)
-+        {
+         {
+-            eprintf("[whole surface] - ");
 +            __try { D[k] = *(unsigned long *)(Ptr + Offs[k]) - Ptr; }
 +            __except (1) { D[k] = 0xdeadbeefUL; }
-+        }
-+
+         }
+ 
+-        if (lpDestRect != NULL)
 +        eprintf("legacy-slot: %d ptr=%08x key=%08x d28=%08x d30=%08x d38=%08x d40=%08x\n",
 +                i, (unsigned)Ptr, (unsigned)Key, (unsigned)D[4], (unsigned)D[5],
 +                (unsigned)D[6], (unsigned)D[7]);
@@ -765,19 +858,28 @@ index d053947..00280e0 100644
 +        unsigned long Ptr, Key, Refs;
 +
 +        __try
-+        {
+         {
+-            eprintf("[%i x %i - %i x %i] - ", lpDestRect->left, lpDestRect->top, lpDestRect->right, lpDestRect->bottom);
 +            Ptr = Table[i * 3 + 0];
 +            Key = Table[i * 3 + 1];
 +            Refs = Table[i * 3 + 2];
-+        }
+         }
+-        else
 +        __except (1)
-+        {
+         {
+-            eprintf("[whole surface] - ");
 +            break;
-+        }
-+
+         }
+-#endif
+ 
+-        if (lpDDSrcSurface->primary)
 +        if (Ptr == 0) continue;
 +
-+        {
+         {
+-#ifdef DEBUG_DDRAW
+-            eprintf("error\n");
+-#endif
+-            return DDERR_SURFACEBUSY;
 +            unsigned long D[8];
 +            const int Offs[8] = { 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40 };
 +            int k;
@@ -794,9 +896,10 @@ index d053947..00280e0 100644
 +                    (unsigned)D[0], (unsigned)D[1], (unsigned)D[2], (unsigned)D[3],
 +                    (unsigned)D[4], (unsigned)D[5], (unsigned)D[6], (unsigned)D[7]);
 +            Hits++;
-+        }
+         }
 +    }
-+
+ 
+-        if (lpSrcRect != NULL)
 +    fclose(F);
 +    eprintf("legacy-cache: %d entries -> %s\n", Hits, Path);
 +}
@@ -820,7 +923,11 @@ index d053947..00280e0 100644
 +        if ((V < 0x00100000UL) || (V > 0x7fffffffUL)) continue;
 +
 +        __try
-+        {
+         {
+-            srcrect.x = lpSrcRect->left;
+-            srcrect.y = lpSrcRect->top;
+-            srcrect.w = lpSrcRect->right - lpSrcRect->left;
+-            srcrect.h = lpSrcRect->bottom - lpSrcRect->top;
 +            Key = *(unsigned long *)V;
 +            Type = *(unsigned long *)(V + 4);
 +            Sect = *(unsigned long *)(V + 0x18);
@@ -828,27 +935,48 @@ index d053947..00280e0 100644
 +        __except (1)
 +        {
 +            continue;
-+        }
-+
+         }
+ 
+-        fill_first = 0;
+-        if (lpDestRect != NULL)
 +        if ((Key < 0x01000000UL) || (Key > 0x0fffffffUL)) continue;
 +        if ((Type > 8) && (Type != 0xffffffffUL)) continue;
 +
 +        Delta = Sect - V;
 +
-+        {
+         {
+-            dstrect.x = lpDestRect->left;
+-            dstrect.y = lpDestRect->top;
+-            dstrect.w = lpDestRect->right - lpDestRect->left;
+-            dstrect.h = lpDestRect->bottom - lpDestRect->top;
 +            int k;
 +            unsigned long D[8];
 +            const int Offs[8] = { 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40 };
-+
+ 
+-            if (lpSrcRect != NULL)
 +            for (k = 0; k < 8; k++)
-+            {
+             {
+-                if (srcrect.w > dstrect.w) srcrect.w = dstrect.w;
+-                if (srcrect.h > dstrect.h) srcrect.h = dstrect.h;
+-
+-                if ((dstrect.w > srcrect.w) ||
+-                    (dstrect.h > srcrect.h)
+-                   )
+-                {
+-                    fill_first = 1;
+-                }
 +                __try { D[k] = *(unsigned long *)(V + Offs[k]) - V; }
 +                __except (1) { D[k] = 0xdeadbeefUL; }
-+            }
+             }
+-            else
 +
 +            if (!((D[0] > 0) && (D[0] < 0x10000UL) && (D[1] > D[0]) &&
 +                  (D[3] > D[1]) && (D[4] > D[3]) && (D[4] < 0x2000000UL)))
-+            {
+             {
+-                srcrect.x = 0;
+-                srcrect.y = 0;
+-                srcrect.w = dstrect.w;
+-                srcrect.h = dstrect.h;
 +                continue;
 +            }
 +
@@ -1516,22 +1644,179 @@ index d053947..00280e0 100644
 +}
 +
 +
- uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, struct _rect *lpDestRect, struct IDirectDrawSurface_c * lpDDSrcSurface, struct _rect *lpSrcRect, uint32_t dwFlags, struct _ddbltfx * lpDDBltFX)
- {
++uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, struct _rect *lpDestRect, struct IDirectDrawSurface_c * lpDDSrcSurface, struct _rect *lpSrcRect, uint32_t dwFlags, struct _ddbltfx * lpDDBltFX)
++{
 +    LegacyCallerTrace("blt");
 +    LegacyBlitMark(lpThis, lpDestRect, lpDDSrcSurface, lpSrcRect);
-     SDL_Rect dstrect, srcrect;
-     int fill_first;
- 
-@@ -1130,6 +2278,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
- 
-             display_virtual_keyboard(lpThis->Renderer);
-             SDL_RenderPresent(lpThis->Renderer);
++    SDL_Rect dstrect, srcrect;
++    int fill_first;
++
++#ifdef DEBUG_DDRAW
++    eprintf("IDirectDrawSurface_Blt: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x, 0x%" PRIxPTR " - ", (uintptr_t)lpThis, (uintptr_t)lpDestRect, (uintptr_t)lpDDSrcSurface, (uintptr_t)lpSrcRect, dwFlags, (uintptr_t)lpDDBltFX);
++#endif
++
++    if (lpThis == NULL)
++    {
++#ifdef DEBUG_DDRAW
++        eprintf("error\n");
++#endif
++        return DDERR_INVALIDPARAMS;
++    }
++
++    if (((dwFlags == (DDBLT_ASYNC | DDBLT_COLORFILL)) && (lpDDBltFX != NULL)) ||
++        ((dwFlags == (DDBLT_WAIT | DDBLT_COLORFILL)) && (lpDDBltFX != NULL))
++       )
++    {
++#ifdef DEBUG_DDRAW
++        eprintf("fill %s: 0x%x - ", ((lpThis->primary)?"frontbuffer":((lpThis->backbuffer)?"backbuffer":"surface")), lpDDBltFX->dwFillColor);
++
++        if (lpDestRect != NULL)
++        {
++            eprintf("[%i x %i - %i x %i] - ", lpDestRect->left, lpDestRect->top, lpDestRect->right, lpDestRect->bottom);
++        }
++        else
++        {
++            eprintf("[whole surface] - ");
++        }
++#endif
++
++        if (lpDestRect != NULL)
++        {
++            dstrect.x = lpDestRect->left;
++            dstrect.y = lpDestRect->top;
++            dstrect.w = lpDestRect->right - lpDestRect->left;
++            dstrect.h = lpDestRect->bottom - lpDestRect->top;
++        }
++
++        if (lpThis->primary)
++        {
++            Uint8 r, g, b;
++
++            SDL_GetRGB(lpDDBltFX->dwFillColor, lpThis->lpBackbuffer->Surface->format, &r, &g, &b);
++
++            SDL_SetRenderDrawColor(lpThis->Renderer, r, g, b, 255);
++
++            if (0 != SDL_RenderFillRect(lpThis->Renderer, (lpDestRect != NULL)?&dstrect:NULL))
++            {
++#ifdef DEBUG_DDRAW
++                eprintf("error\n");
++#endif
++                return DDERR_SURFACEBUSY;
++            }
++
++            display_virtual_keyboard(lpThis->Renderer);
++            SDL_RenderPresent(lpThis->Renderer);
 +    LegacyScreenshot(lpThis->Renderer);
++
++            // clear next frame
++            SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
++            SDL_RenderClear(lpThis->Renderer);
++
++            lpThis->was_flipped = 0;
++
++#ifdef DEBUG_DDRAW
++            eprintf("OK\n");
++#endif
++
++            return DD_OK;
++        }
++
++        if (0 != SDL_FillRect(lpThis->Surface, (lpDestRect != NULL)?&dstrect:NULL, lpDDBltFX->dwFillColor))
++        {
++#ifdef DEBUG_DDRAW
++            eprintf("error\n");
++#endif
++            return DDERR_SURFACEBUSY;
++        }
++
++#ifdef DEBUG_DDRAW
++        eprintf("OK\n");
++#endif
++
++        return DD_OK;
++    }
++
++    if (((dwFlags == 0) && (lpDDBltFX == NULL)) ||
++        ((dwFlags == (DDBLT_ROP | DDBLT_WAIT)) && (lpDDBltFX != NULL) && (lpDDBltFX->dwROP == SRCCOPY)) ||
++        ((dwFlags == (DDBLT_KEYSRCOVERRIDE | DDBLT_WAIT)) && (lpDDBltFX != NULL))
++       )
++    {
++        if (lpDDSrcSurface == NULL)
++        {
++#ifdef DEBUG_DDRAW
++            eprintf("error\n");
++#endif
++            return DDERR_INVALIDPARAMS;
++        }
++
++#ifdef DEBUG_DDRAW
++        eprintf("copy %s to %s - ", ((lpDDSrcSurface->primary)?"frontbuffer":((lpDDSrcSurface->backbuffer)?"backbuffer":"surface")), ((lpThis->primary)?"frontbuffer":((lpThis->backbuffer)?"backbuffer":"surface")));
++
++        if (lpSrcRect != NULL)
++        {
++            eprintf("[%i x %i - %i x %i] - ", lpSrcRect->left, lpSrcRect->top, lpSrcRect->right, lpSrcRect->bottom);
++        }
++        else
++        {
++            eprintf("[whole surface] - ");
++        }
++
++        if (lpDestRect != NULL)
++        {
++            eprintf("[%i x %i - %i x %i] - ", lpDestRect->left, lpDestRect->top, lpDestRect->right, lpDestRect->bottom);
++        }
++        else
++        {
++            eprintf("[whole surface] - ");
++        }
++#endif
++
++        if (lpDDSrcSurface->primary)
++        {
++#ifdef DEBUG_DDRAW
++            eprintf("error\n");
++#endif
++            return DDERR_SURFACEBUSY;
++        }
++
++        if (lpSrcRect != NULL)
++        {
++            srcrect.x = lpSrcRect->left;
++            srcrect.y = lpSrcRect->top;
++            srcrect.w = lpSrcRect->right - lpSrcRect->left;
++            srcrect.h = lpSrcRect->bottom - lpSrcRect->top;
++        }
++
++        fill_first = 0;
++        if (lpDestRect != NULL)
++        {
++            dstrect.x = lpDestRect->left;
++            dstrect.y = lpDestRect->top;
++            dstrect.w = lpDestRect->right - lpDestRect->left;
++            dstrect.h = lpDestRect->bottom - lpDestRect->top;
++
++            if (lpSrcRect != NULL)
++            {
++                if (srcrect.w > dstrect.w) srcrect.w = dstrect.w;
++                if (srcrect.h > dstrect.h) srcrect.h = dstrect.h;
++
++                if ((dstrect.w > srcrect.w) ||
++                    (dstrect.h > srcrect.h)
++                   )
++                {
++                    fill_first = 1;
++                }
++            }
++            else
++            {
++                srcrect.x = 0;
++                srcrect.y = 0;
++                srcrect.w = dstrect.w;
++                srcrect.h = dstrect.h;
  
-             // clear next frame
-             SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1316,6 +2465,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+                 if ((dstrect.w > lpDDSrcSurface->Surface->w) ||
+                     (dstrect.h > lpDDSrcSurface->Surface->h)
+@@ -1316,6 +2481,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
              SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1539,7 +1824,7 @@ index d053947..00280e0 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1370,32 +2520,164 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
+@@ -1370,32 +2536,164 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
  //    return IDirectDrawSurface_EnumOverlayZOrders(lpThis->lpObject, param1, param2, (LPDDENUMSURFACESCALLBACK)param3);
  }
  
@@ -1649,16 +1934,17 @@ index d053947..00280e0 100644
 -            src = (uint8_t *) Surface->pixels;
 -            srcpitch = Surface->pitch;
 +            static int Calls = 0;
-+
+ 
+-            if (srcpitch == dstpitch)
 +            Calls++;
 +
 +            if ((Calls % 400) == 1)
-+            {
+             {
+-                memcpy(dst, src, Surface->h * srcpitch);
 +                eprintf("legacy-upscale: copy#%d surface=%dx%d bpp=%d | texture=%dx%d fmt=%s factor=%d\n",
 +                        Calls, Surface->w, Surface->h, Surface->format->BytesPerPixel,
 +                        TW, TH, SDL_GetPixelFormatName(Fmt), Factor);
- 
--            if (srcpitch == dstpitch)
++
 +                LegacyDumpSlots();
 +                LegacyDumpImageCache();
 +                LegacyScanImageStruct();
@@ -1670,8 +1956,7 @@ index d053947..00280e0 100644
 +        if (0 == SDL_LockSurface(Surface))
 +        {
 +            if ((Factor > 1) && ((Surface->w * Factor) == TW) && ((Surface->h * Factor) == TH))
-             {
--                memcpy(dst, src, Surface->h * srcpitch);
++            {
 +                static int EpxCalls = 0;
 +
 +                EpxCalls++;
@@ -1694,12 +1979,12 @@ index d053947..00280e0 100644
  
 -                for (height = Surface->h; height != 0; height--)
 +                if (srcpitch == dstpitch)
-+                {
+                 {
+-                    memcpy(dst, src, copylength);
 +                    memcpy(dst, src, Surface->h * srcpitch);
 +                }
 +                else
-                 {
--                    memcpy(dst, src, copylength);
++                {
 +                    copylength = Surface->w * Surface->format->BytesPerPixel;
 +
 +                    for (height = Surface->h; height != 0; height--)
@@ -1714,8 +1999,59 @@ index d053947..00280e0 100644
                  }
              }
  
-@@ -1408,6 +2690,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+@@ -1406,8 +2704,59 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+     }
+ }
  
++/* Places the finished frame inside the window.
++
++   LEGACY_FIT=box      keep 4:3, black bars either side (default)
++   LEGACY_FIT=stretch  fill the window, accept horizontal distortion
++   LEGACY_FIT=crop     fill the window, lose the top and bottom
++
++   Done by hand rather than with SDL_RenderSetLogicalSize because that centres the
++   logical viewport wrongly here, and because the fit mode is a user choice. */
++static void LegacyPresentTexture(SDL_Renderer *Renderer, SDL_Texture *Texture)
++{
++    const char *Fit = getenv("LEGACY_FIT");
++    int OutW = 0, OutH = 0, TexW = 0, TexH = 0;
++    SDL_Rect Dst;
++
++    SDL_RenderSetViewport(Renderer, NULL);
++    SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 255);
++    SDL_RenderClear(Renderer);
++
++    if ((Texture == NULL) || (0 != SDL_GetRendererOutputSize(Renderer, &OutW, &OutH)) ||
++        (0 != SDL_QueryTexture(Texture, NULL, NULL, &TexW, &TexH)) || (TexW <= 0) || (TexH <= 0))
++    {
++        return;
++    }
++
++    if ((Fit != NULL) && ((strcmp(Fit, "stretch") == 0) || (strcmp(Fit, "crop") == 0)))
++    {
++        Dst.x = 0;
++        Dst.y = 0;
++        Dst.w = OutW;
++        Dst.h = OutH;
++    }
++    else
++    {
++        double ScaleX = (double)OutW / (double)TexW;
++        double ScaleY = (double)OutH / (double)TexH;
++        double Scale = (ScaleX < ScaleY) ? ScaleX : ScaleY;
++
++        Dst.w = (int)(TexW * Scale + 0.5);
++        Dst.h = (int)(TexH * Scale + 0.5);
++        Dst.x = (OutW - Dst.w) / 2;
++        Dst.y = (OutH - Dst.h) / 2;
++
++        if (Dst.x < 0) Dst.x = 0;
++        if (Dst.y < 0) Dst.y = 0;
++    }
++
++    SDL_RenderCopy(Renderer, Texture, NULL, &Dst);
++}
++
  uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
  {
 +    LegacyCallerTrace("flip");
@@ -1723,15 +2059,19 @@ index d053947..00280e0 100644
  #ifdef DEBUG_DDRAW
      eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
  #endif
-@@ -1444,6 +2728,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
-         SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
+@@ -1441,9 +2790,10 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
+         }
+ 
+         CopyBackbufferSurfaceToTexture(lpThis->lpBackbuffer->Surface, lpThis->Texture[lpThis->current_texture]);
+-        SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
++        LegacyPresentTexture(lpThis->Renderer, lpThis->Texture[lpThis->current_texture]);
          display_virtual_keyboard(lpThis->Renderer);
          SDL_RenderPresent(lpThis->Renderer);
 +    LegacyScreenshot(lpThis->Renderer);
  
          SDL_Delay(Display_DelayAfterFlip);
  
-@@ -1690,6 +2975,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+@@ -1690,6 +3040,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
  
  uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
  {
