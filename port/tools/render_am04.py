@@ -43,7 +43,8 @@ def palette_rgb(data, sec, index):
     out = []
     for i in range(256):
         c = struct.unpack_from('<I', data, rec + i * 4)[0]
-        out.append((c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF))
+        # stored little endian as 0x00RRGGBB, so the low byte is blue
+        out.append(((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF))
     return out
 
 
