@@ -84,3 +84,17 @@ native port.
 
 Do not use LEGACY_UPSCALE=2x for this: it builds the backbuffer at 1280x960 as well, so the engine
 draws 640x480 content into the top-left quarter and the EPX filter never matches. That path is dead.
+
+### Verification pitfalls (cost hours, worth remembering)
+
+**Testing a window-size change over RDP is meaningless.** An RDP session reports its own desktop
+size to Windows, so every window is clamped to it. A 640x480 window, a 1280x960 window and a
+1920x1440 window all look identical on a phone-sized remote session. Test display changes at the
+physical desktop, or check the resolution first: `Get-CimInstance Win32_VideoController`.
+
+The same applies to a headless host: the virtual display reports 1024x768, so window sizes above
+that are clamped there too and screenshots of the desktop come back black.
+
+**Practical ceiling on a 1080p screen is 2x.** 1920x1440 is taller than 1080 and gets cut off at the
+bottom edge, so 3x is only usable on a taller display. Septerra.cfg already pins the game to
+1280x960, which is why LEGACY_WINDOW=1280x960 looks identical to a normal launch: normal *is* 2x.
