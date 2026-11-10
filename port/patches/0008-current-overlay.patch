@@ -303,7 +303,7 @@ index a4d1c0e..c1d8faa 100644
      else:
          env.Append(CCFLAGS   = '-Dmain=SDL_main',
 diff --git a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c
-index d053947..295abc0 100644
+index d053947..00280e0 100644
 --- a/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 +++ b/games/Septerra Core/SR-Septerra/WinApi-ddraw.c	
 @@ -26,6 +26,8 @@
@@ -323,7 +323,28 @@ index d053947..295abc0 100644
  #define eprintf(...) fprintf(stderr,__VA_ARGS__)
  
  
-@@ -850,6 +853,8 @@ uint32_t CCALL IDirectDraw_SetCooperativeLevel_c(struct IDirectDraw_c *lpThis, v
+@@ -556,6 +559,20 @@ uint32_t CCALL IDirectDraw_CreateSurface_c(struct IDirectDraw_c *lpThis, struct
+                 Uint32 Rmask, Gmask, Bmask, Amask;
+                 if (SDL_PixelFormatEnumToMasks(format, &bpp, &Rmask, &Gmask, &Bmask, &Amask))
+                 {
++                    /* With EPX the texture is W*factor wide, but the game must keep drawing at
++                       native size: the shim smooths the finished frame afterwards instead of
++                       the game stretching its own art. */
++                    {
++                        const char *UpEnv = getenv("LEGACY_UPSCALE");
++                        int UpF = ((UpEnv != NULL) && ((strcmp(UpEnv, "2x") == 0) || (strcmp(UpEnv, "epx") == 0) || (strcmp(UpEnv, "2") == 0))) ? 2 : 1;
++
++                        if (UpF > 1)
++                        {
++                            width /= UpF;
++                            height /= UpF;
++                        }
++                    }
++
+                     pitch = width * (bpp >> 3);
+                     pitch = (pitch + 3) & ~3;
+ 
+@@ -850,6 +867,8 @@ uint32_t CCALL IDirectDraw_SetCooperativeLevel_c(struct IDirectDraw_c *lpThis, v
      return DD_OK;
  }
  
@@ -332,7 +353,7 @@ index d053947..295abc0 100644
  uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32_t dwWidth, uint32_t dwHeight, uint32_t dwBPP)
  {
      Uint32 window_format, texture_format;
-@@ -875,6 +880,30 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -875,6 +894,30 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
          return DDERR_UNSUPPORTEDMODE;
      }
  
@@ -363,7 +384,7 @@ index d053947..295abc0 100644
      lpThis->Window = SDL_CreateWindow("Septerra Core", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, (Display_Width != 0)?Display_Width:dwWidth, (Display_Height != 0)?Display_Height:dwHeight, ((Display_Resizable && (Display_Mode == 0))?SDL_WINDOW_RESIZABLE:0) | ((Display_Mode == 1)?SDL_WINDOW_FULLSCREEN_DESKTOP:0) | ((Display_Mode == 2)?SDL_WINDOW_FULLSCREEN:0) | SDL_WINDOW_HIDDEN);
      if (lpThis->Window == NULL)
      {
-@@ -884,6 +913,14 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -884,6 +927,14 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
          return DDERR_UNSUPPORTEDMODE;
      }
  
@@ -378,7 +399,7 @@ index d053947..295abc0 100644
      lpThis->Renderer = SDL_CreateRenderer(lpThis->Window, -1, (Display_VSync)?SDL_RENDERER_PRESENTVSYNC:0);
      if (lpThis->Renderer == NULL)
      {
-@@ -909,7 +946,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -909,7 +960,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
      }
  #endif
  
@@ -387,7 +408,7 @@ index d053947..295abc0 100644
      {
          SDL_DestroyRenderer(lpThis->Renderer);
          lpThis->Renderer = NULL;
-@@ -935,7 +972,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
+@@ -935,7 +986,7 @@ uint32_t CCALL IDirectDraw_SetDisplayMode_c(struct IDirectDraw_c *lpThis, uint32
  
      for (index = 0; index < 3; index++)
      {
@@ -396,7 +417,7 @@ index d053947..295abc0 100644
      }
  
      if ((lpThis->Texture[0] == NULL) || (lpThis->Texture[1] == NULL) || (lpThis->Texture[2] == NULL))
-@@ -1070,8 +1107,1105 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
+@@ -1070,8 +1121,1105 @@ uint32_t CCALL IDirectDrawSurface_AddOverlayDirtyRect_c(struct IDirectDrawSurfac
  //    return IDirectDrawSurface_AddOverlayDirtyRect(lpThis->lpObject, (LPRECT)param1);
  }
  
@@ -1502,7 +1523,7 @@ index d053947..295abc0 100644
      SDL_Rect dstrect, srcrect;
      int fill_first;
  
-@@ -1130,6 +2264,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1130,6 +2278,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
  
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1510,7 +1531,7 @@ index d053947..295abc0 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1316,6 +2451,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
+@@ -1316,6 +2465,7 @@ uint32_t CCALL IDirectDrawSurface_Blt_c(struct IDirectDrawSurface_c *lpThis, str
              SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
              display_virtual_keyboard(lpThis->Renderer);
              SDL_RenderPresent(lpThis->Renderer);
@@ -1518,7 +1539,7 @@ index d053947..295abc0 100644
  
              // clear next frame
              SDL_SetRenderDrawColor(lpThis->Renderer, 0, 0, 0, 255);
-@@ -1370,32 +2506,154 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
+@@ -1370,32 +2520,164 @@ uint32_t CCALL IDirectDrawSurface_EnumOverlayZOrders_c(struct IDirectDrawSurface
  //    return IDirectDrawSurface_EnumOverlayZOrders(lpThis->lpObject, param1, param2, (LPDDENUMSURFACESCALLBACK)param3);
  }
  
@@ -1630,15 +1651,14 @@ index d053947..295abc0 100644
 +            static int Calls = 0;
 +
 +            Calls++;
- 
--            if (srcpitch == dstpitch)
++
 +            if ((Calls % 400) == 1)
-             {
--                memcpy(dst, src, Surface->h * srcpitch);
++            {
 +                eprintf("legacy-upscale: copy#%d surface=%dx%d bpp=%d | texture=%dx%d fmt=%s factor=%d\n",
 +                        Calls, Surface->w, Surface->h, Surface->format->BytesPerPixel,
 +                        TW, TH, SDL_GetPixelFormatName(Fmt), Factor);
-+
+ 
+-            if (srcpitch == dstpitch)
 +                LegacyDumpSlots();
 +                LegacyDumpImageCache();
 +                LegacyScanImageStruct();
@@ -1650,7 +1670,18 @@ index d053947..295abc0 100644
 +        if (0 == SDL_LockSurface(Surface))
 +        {
 +            if ((Factor > 1) && ((Surface->w * Factor) == TW) && ((Surface->h * Factor) == TH))
-+            {
+             {
+-                memcpy(dst, src, Surface->h * srcpitch);
++                static int EpxCalls = 0;
++
++                EpxCalls++;
++
++                if (EpxCalls == 1)
++                {
++                    eprintf("legacy-upscale: EPX %dx%d -> %dx%d\n",
++                            Surface->w, Surface->h, TW, TH);
++                }
++
 +                LegacyUpscaleEPX2((const uint8_t *)Surface->pixels, Surface->w, Surface->h,
 +                                  Surface->pitch, dst, dstpitch,
 +                                  Surface->format->BytesPerPixel);
@@ -1670,20 +1701,20 @@ index d053947..295abc0 100644
                  {
 -                    memcpy(dst, src, copylength);
 +                    copylength = Surface->w * Surface->format->BytesPerPixel;
- 
--                    dst += dstpitch;
--                    src += srcpitch;
++
 +                    for (height = Surface->h; height != 0; height--)
 +                    {
 +                        memcpy(dst, src, copylength);
-+
+ 
+-                    dst += dstpitch;
+-                    src += srcpitch;
 +                        dst += dstpitch;
 +                        src += srcpitch;
 +                    }
                  }
              }
  
-@@ -1408,6 +2666,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
+@@ -1408,6 +2690,8 @@ static void CopyBackbufferSurfaceToTexture(SDL_Surface *Surface, SDL_Texture *Te
  
  uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, struct IDirectDrawSurface_c * lpDDSurfaceTargetOverride, uint32_t dwFlags)
  {
@@ -1692,7 +1723,7 @@ index d053947..295abc0 100644
  #ifdef DEBUG_DDRAW
      eprintf("IDirectDrawSurface_Flip: 0x%" PRIxPTR ", 0x%" PRIxPTR ", 0x%x - ", (uintptr_t)lpThis, (uintptr_t)lpDDSurfaceTargetOverride, dwFlags);
  #endif
-@@ -1444,6 +2704,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
+@@ -1444,6 +2728,7 @@ uint32_t CCALL IDirectDrawSurface_Flip_c(struct IDirectDrawSurface_c *lpThis, st
          SDL_RenderCopy(lpThis->Renderer, lpThis->Texture[lpThis->current_texture], NULL, NULL);
          display_virtual_keyboard(lpThis->Renderer);
          SDL_RenderPresent(lpThis->Renderer);
@@ -1700,7 +1731,7 @@ index d053947..295abc0 100644
  
          SDL_Delay(Display_DelayAfterFlip);
  
-@@ -1690,6 +2951,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
+@@ -1690,6 +2975,10 @@ uint32_t CCALL IDirectDrawSurface_IsLost_c(struct IDirectDrawSurface_c *lpThis)
  
  uint32_t CCALL IDirectDrawSurface_Lock_c(struct IDirectDrawSurface_c *lpThis, void * lpDestRect, struct _ddsurfacedesc *lpDDSurfaceDesc, uint32_t dwFlags, void * hEvent)
  {

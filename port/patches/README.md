@@ -41,3 +41,6 @@ Read them for history, apply `0008` to build.
 - `LEGACY_IMAGE_DIR` / `LEGACY_FIND_IMAGE` — live image-struct dump and key search, used to solve
   the AM04 palette format.
 - `LEGACY_CACHE_DUMP`, `LEGACY_SLOTS` — image cache and slot draining.
+- `LEGACY_UPSCALE=2x` — EPX whole-frame upscale. The backbuffer stays at native size while the
+  texture is `W*factor`, so the filter has matching source and destination; without that split the
+  engine drew into a 2x buffer and the filter never ran.

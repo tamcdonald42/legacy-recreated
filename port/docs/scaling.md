@@ -82,8 +82,32 @@ This is the safe "it runs bigger" mode. It adds no detail - it is the same 640x4
 True added detail still needs either per-element replacement art with a layout-aware engine, or the
 native port.
 
-Do not use LEGACY_UPSCALE=2x for this: it builds the backbuffer at 1280x960 as well, so the engine
-draws 640x480 content into the top-left quarter and the EPX filter never matches. That path is dead.
+### EPX upscale (LEGACY_UPSCALE=2x) - the one that actually looks better
+
+`Play Sharp.bat` runs `LEGACY_WINDOW=1280x960` with `LEGACY_UPSCALE=2x`.
+
+What has to be true for this to work, and was not true before:
+
+- the **backbuffer must stay at 640x480**, so the engine keeps drawing in its native coordinate
+  space. The texture is still `W * factor` (1280x960), so `CopyBackbufferSurfaceToTexture` finds a
+  matching pair and runs `LegacyUpscaleEPX2` over the finished frame.
+- the backbuffer used to be created at the *texture* size, so with factor 2 the engine drew
+  640x480 of content into a 1280x960 buffer, the EPX condition never matched, and the result was a
+  small image in the top-left quarter. Fixed by dividing the drawable size by the factor when EPX
+  is on.
+
+Why EPX beats the plain stretch: with no upscale the engine renders its own 1280x960 frame by
+scaling every sprite, which goes through the renderer's linear filter and smears edges - measured
+on the main menu, the menu text has colour bleed along the letterforms. EPX renders the frame at
+640x480 first (crisp source pixels), then rebuilds corners and diagonals at 2x. Same layout, same
+timing, visibly cleaner text and sprite edges.
+
+Cost: one extra full-frame pass over 307,200 pixels per present. Measured fine on the 4060 box; the
+menu loop stayed uncapped.
+
+Trade-off with art packs: `LEGACY_UPSCALE` makes the engine draw at 640x480, so hi-res pack art is
+also doubled before it reaches the screen and loses the sharpness that was the point of a pack.
+Use `Play Scaled.bat` (art, game renders at 1280) or `Play Sharp.bat` (EPX, no pack), not both.
 
 ### Verification pitfalls (cost hours, worth remembering)
 
