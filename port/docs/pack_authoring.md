@@ -165,3 +165,44 @@ Two process failures to avoid repeating:
 
 Consequence: everything after this point that assumed "the pack does not reach the screen" -
 the twelve-file sweep, the dark silhouettes investigation - was chasing a solved problem.
+
+## Overlay replacement (runtime art, no file rewrite)
+
+An alternative to rewriting an AM04 file: name a sprite (data file key + entry) and give the pack a
+replacement image. The blitter hook draws it in place, at present time, so it is never painted over.
+
+This is the path for hand-drawn or upscaled art, because it needs no re-encoding of palette, runs or
+row tables - any image can be dropped in.
+
+### Finding the target
+
+Run `Trace Blits.bat`, play to the screen you care about, and read `blit_keys.log`:
+
+    blit-key: key=01001F4B entry=7 frame=0 rect=16,342 89,379
+
+`key` and `entry` identify the sprite; `rect` is x1,y1 x2,y2, so that one is 73x37 at 16,342.
+
+**A slot is often more than one entry.** 01001F4B entry 7 is the idle inventory slot and entry 6 is
+the same slot hovered - they are alternatives, not layers. Replace both, or the change appears to do
+nothing whenever the cursor happens to be over it.
+
+### Making the art
+
+    python3 port/tools/png_scl.py to-scl myart.png myart.scl          # native size
+    python3 port/tools/png_scl.py to-scl myart.png myart.scl --scale 2  # 2x, overflows its cell
+
+- Author at the sprite's own size (`rect` width and height) for a layout-safe replacement.
+- Alpha below 128, and pure black, both become transparent (the hook skips those pixels).
+- `--scale 2` makes each source pixel a 2x2 block on screen. It adds no detail by itself and the
+  engine still reserves the original cell, so the sprite spills over its neighbours.
+- Convert back to edit: `png_scl.py to-png myart.scl myart.png`.
+
+### Installing
+
+Put the `.scl` in `pack/scale/` and list it in `pack/scale/scale.txt`:
+
+    01001F4B 7 myart.scl
+
+Then launch with `Play Scaled.bat`. Loader lines in the log confirm what was picked up:
+
+    scale: key 01001F4B entry 7 -> 73x37 x1 (myart.scl)
