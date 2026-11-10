@@ -35,3 +35,4 @@ caps/
 pack_test_log.txt
 *.log
 readme_tmp*
+art/  
