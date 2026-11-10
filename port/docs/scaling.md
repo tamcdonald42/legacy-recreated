@@ -105,9 +105,15 @@ timing, visibly cleaner text and sprite edges.
 Cost: one extra full-frame pass over 307,200 pixels per present. Measured fine on the 4060 box; the
 menu loop stayed uncapped.
 
-Trade-off with art packs: `LEGACY_UPSCALE` makes the engine draw at 640x480, so hi-res pack art is
-also doubled before it reaches the screen and loses the sharpness that was the point of a pack.
-Use `Play Scaled.bat` (art, game renders at 1280) or `Play Sharp.bat` (EPX, no pack), not both.
+Art packs work under EPX, with one rule: **author pack art at native size** (43x43 for the
+inventory icons, 73x37 for the disc). EPX draws at 640x480 and doubles the finished frame, so art
+authored at 2x gets downsampled into the native cell and then doubled again - a wasted round trip
+that softens it. Native-sized replacement art comes out crisp and edge-rebuilt like the rest of the
+frame. Verified: with `LEGACY_SCALE_DIR` and `LEGACY_UPSCALE=2x` both set, the loader reports the
+same `scale: key ... entry ...` lines and the frame log reports `EPX 640x480 -> 1280x960`.
+
+What this still cannot do is add detail. EPX sharpens the existing art; it does not invent pixels.
+Replacement art changes style at native resolution. Resolution itself is the native port's job.
 
 ### Verification pitfalls (cost hours, worth remembering)
 
